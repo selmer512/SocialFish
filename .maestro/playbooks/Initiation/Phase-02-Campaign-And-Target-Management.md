@@ -88,11 +88,16 @@ This phase turns the prototype into a usable campaign management workflow for th
   - `docs/features/simulation-target-import.md` documents accepted columns, validation behavior, import-batch audit behavior, and links to `[[Simulation-Campaigns]]` plus `[[AI-Provider-Configuration]]`.
   - `tests/test_simulation_routes.py` covers the rendered upload guidance and generated sample CSV download.
 
-- [ ] Add automated coverage for campaign and target workflows:
+- [x] Add automated coverage for campaign and target workflows:
   - Test campaign creation, update, archive, and listing
   - Test manual target creation and validation failures
   - Test CSV upload with valid rows, invalid rows, and duplicate contacts
   - Test that archived records remain available in metrics/history queries
+
+  Notes for follow-on tasks:
+  - `tests/test_simulation_routes.py` now asserts created campaigns appear in `/simulations/campaigns`, archived campaigns are hidden from the default list, and duplicate CSV contacts are surfaced through authenticated upload feedback while importing only one target.
+  - `tests/test_simulation_service.py` now verifies archived campaigns and targets remain available through campaign detail, metrics, and event history queries.
+  - Verification passed with `python -m unittest discover -s tests` on 2026-09-21.
 
 - [ ] Run the campaign workflow verification:
   - Run the new tests or smoke script

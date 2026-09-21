@@ -191,6 +191,12 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(row[2], "draft")
         self.assertIn("sms", row[3])
 
+        list_response = self.client.get("/simulations/campaigns")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertIn(b"Route Managed Campaign", list_response.data)
+        self.assertIn(b"email", list_response.data)
+        self.assertIn(b"sms", list_response.data)
+
         detail_response = self.client.get("/simulations/campaigns/{}".format(campaign_id))
         self.assertEqual(detail_response.status_code, 200)
         self.assertIn(b"Edit Campaign", detail_response.data)
@@ -260,6 +266,10 @@ class SimulationRoutesTest(unittest.TestCase):
             conn.close()
         self.assertEqual(archived[0], "archived")
         self.assertIsNotNone(archived[1])
+
+        archived_list_response = self.client.get("/simulations/campaigns")
+        self.assertEqual(archived_list_response.status_code, 200)
+        self.assertNotIn(b"Route Managed Campaign FY26", archived_list_response.data)
 
     def test_campaign_create_route_displays_validation_errors(self):
         response = self.client.post(
@@ -426,6 +436,47 @@ class SimulationRoutesTest(unittest.TestCase):
             conn.close()
         self.assertEqual(batch, ("route-targets.csv", 3, 2, 1, 2))
         self.assertEqual(imported, 2)
+
+    def test_target_csv_upload_reports_duplicate_contacts(self):
+        campaign_id = self._campaign_id()
+        csv_content = (
+            "name,email,phone,channel,department\n"
+            "CSV Duplicate One,duplicate.route@example.test,,email,Security\n"
+            "CSV Duplicate Two,duplicate.route@example.test,,email,Security\n"
+        )
+
+        response = self.client.post(
+            "/simulations/campaigns/{}/targets/upload".format(campaign_id),
+            data={
+                "targets_csv": (
+                    io.BytesIO(csv_content.encode("utf-8")),
+                    "duplicate-targets.csv",
+                ),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Imported 1 target(s) with 1 validation error(s).", response.data)
+        self.assertIn(b"CSV row 3: Duplicate target contact in CSV.", response.data)
+        self.assertIn(b"Row 3: Duplicate target contact in CSV.", response.data)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            imported = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM simulation_targets
+                WHERE campaign_id = ?
+                    AND source = 'csv'
+                    AND email = 'duplicate.route@example.test'
+                """,
+                (campaign_id,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(imported, 1)
 
 
 if __name__ == "__main__":

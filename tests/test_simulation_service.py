@@ -14,6 +14,7 @@ from core.simulation_service import (
     import_targets_csv,
     list_ai_provider_settings,
     list_campaigns,
+    list_simulation_events,
     list_targets,
     parse_target_csv,
     record_simulation_event,
@@ -195,6 +196,40 @@ Broken Voice,,,voice,Support,Morgan
             len([target for target in targets if target["source"] == "csv"]),
             2,
         )
+
+    def test_archived_records_remain_available_in_metrics_and_history(self):
+        campaign = create_campaign(self.conn, "Archived Metrics Test", selected_channels=["email"])
+        target = create_target(
+            self.conn,
+            campaign["id"],
+            name="Archived Target",
+            email="archived.target@example.test",
+            channel="email",
+        )
+        event = record_simulation_event(
+            self.conn,
+            campaign["id"],
+            "link_click",
+            target_id=target["id"],
+            metadata={"source": "archive-coverage"},
+        )
+
+        archived_target = archive_target(self.conn, target["id"])
+        archived_campaign = archive_campaign(self.conn, campaign["id"])
+
+        metrics = get_campaign_metrics(self.conn, campaign["id"])
+        detail = get_campaign_detail(self.conn, campaign["id"])
+        events = list_simulation_events(self.conn, campaign["id"])
+
+        self.assertTrue(archived_campaign["archived"])
+        self.assertTrue(archived_target["archived"])
+        self.assertEqual(metrics["aggregate"]["total_targets"], 1)
+        self.assertEqual(metrics["aggregate"]["link_clicked"], 1)
+        self.assertEqual(detail["campaign"]["id"], campaign["id"])
+        self.assertEqual(detail["targets"][0]["id"], target["id"])
+        self.assertTrue(detail["targets"][0]["archived"])
+        self.assertEqual(events[0]["id"], event["id"])
+        self.assertIn("archive-coverage", events[0]["metadata"])
 
     def test_records_event_and_updates_target_rollup(self):
         voice_target_id = self.conn.execute(
