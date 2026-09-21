@@ -13,11 +13,18 @@ This phase creates a self-contained working prototype for a UI-first Cybersecuri
   - New service code should live under `core/` and accept/use the existing SQLite connection style instead of opening an unrelated app or CLI workflow.
   - Navigation should be added to the existing admin dashboard button cluster in `templates/admin/index.html`; secondary pages currently use copied Bootstrap 4 assets and `/creds` breadcrumb/back-link conventions rather than a shared base template.
 
-- [ ] Add a database migration path for the simulation prototype:
+- [x] Add a database migration path for the simulation prototype:
   - Create or extend a migration helper that safely creates tables for `simulation_campaigns`, `simulation_targets`, `simulation_events`, and `ai_provider_configs`
   - Include fields for channel (`email`, `sms`, `voice`), delivery status, opened, forwarded, deleted, link clicked, attachment opened, timestamps, provider type, model name, base URL, and enabled state
   - Seed one clearly labeled authorized training demo campaign with sample targets and sample metrics so the UI has meaningful data immediately
   - Ensure the migration is idempotent and runs from the normal application startup path
+
+  Completion notes:
+  - Extended `core/db_migration.py`, which is already called by `main()` after `initDB(DATABASE)`, to create the Simulation Center and AI provider tables during normal startup.
+  - Seeded one `Authorized Training Demo Campaign` keyed by `authorized-training-demo`, with email/SMS/voice sample targets, delivery/open/forward/delete/click/attachment metrics, and matching demo events.
+  - Seeded local and cloud AI provider placeholder records with model names, base URLs, enabled state, and no real secrets.
+  - Added `tests/test_simulation_migration.py` to verify schema creation, channel coverage, sample metrics, provider placeholders, and idempotent reruns.
+  - Verified with `python -m unittest tests.test_simulation_migration`.
 
 - [ ] Implement a small service layer for simulation metrics and AI configuration:
   - Add functions for listing campaigns, calculating aggregate delivery/open/click/attachment metrics, recording simulation events, and listing/updating AI provider settings

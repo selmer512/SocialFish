@@ -6,7 +6,221 @@ Adds tables for Playwright recorder, templates, sessions, webhooks, cookies, and
 
 import sqlite3
 import os
-from datetime import datetime
+from datetime import UTC, datetime
+
+
+SIMULATION_DEMO_SLUG = "authorized-training-demo"
+
+
+def _ensure_columns(cur, table_name, columns):
+    """Add missing columns when an older prototype schema already exists."""
+    existing = {row[1] for row in cur.execute(f"PRAGMA table_info({table_name})")}
+    for column_name, column_definition in columns.items():
+        if column_name not in existing:
+            cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
+
+
+def _seed_simulation_demo(cur):
+    """Seed deterministic authorized training data for the Simulation Center."""
+    row = cur.execute(
+        "SELECT id FROM simulation_campaigns WHERE slug = ?",
+        (SIMULATION_DEMO_SLUG,),
+    ).fetchone()
+    if row:
+        return
+
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    cur.execute(
+        """
+        INSERT INTO simulation_campaigns (
+            slug, name, description, channel, status, authorized_scope,
+            started_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            SIMULATION_DEMO_SLUG,
+            "Authorized Training Demo Campaign",
+            "Seeded internal-only awareness simulation data for the Phase 01 dashboard.",
+            "email",
+            "active",
+            "Authorized internal training simulation only; no external delivery is configured.",
+            now,
+            now,
+            now,
+        ),
+    )
+    campaign_id = cur.lastrowid
+
+    targets = [
+        {
+            "name": "Avery Stone",
+            "email": "avery.stone@example.test",
+            "phone": "+15550101001",
+            "department": "Finance",
+            "channel": "email",
+            "delivery_status": "delivered",
+            "opened": 1,
+            "forwarded": 0,
+            "deleted": 0,
+            "link_clicked": 1,
+            "attachment_opened": 0,
+        },
+        {
+            "name": "Jordan Lee",
+            "email": "jordan.lee@example.test",
+            "phone": "+15550101002",
+            "department": "Operations",
+            "channel": "sms",
+            "delivery_status": "delivered",
+            "opened": 1,
+            "forwarded": 1,
+            "deleted": 0,
+            "link_clicked": 1,
+            "attachment_opened": 0,
+        },
+        {
+            "name": "Morgan Patel",
+            "email": "morgan.patel@example.test",
+            "phone": "+15550101003",
+            "department": "Support",
+            "channel": "voice",
+            "delivery_status": "delivered",
+            "opened": 0,
+            "forwarded": 0,
+            "deleted": 1,
+            "link_clicked": 0,
+            "attachment_opened": 0,
+        },
+        {
+            "name": "Riley Chen",
+            "email": "riley.chen@example.test",
+            "phone": "+15550101004",
+            "department": "Engineering",
+            "channel": "email",
+            "delivery_status": "delivered",
+            "opened": 1,
+            "forwarded": 0,
+            "deleted": 0,
+            "link_clicked": 0,
+            "attachment_opened": 1,
+        },
+    ]
+
+    event_map = [
+        ("delivered", "delivered_at"),
+        ("opened", "opened_at"),
+        ("forwarded", "forwarded_at"),
+        ("deleted", "deleted_at"),
+        ("link_clicked", "link_clicked_at"),
+        ("attachment_opened", "attachment_opened_at"),
+    ]
+
+    for target in targets:
+        timestamps = {
+            "delivered_at": now if target["delivery_status"] == "delivered" else None,
+            "opened_at": now if target["opened"] else None,
+            "forwarded_at": now if target["forwarded"] else None,
+            "deleted_at": now if target["deleted"] else None,
+            "link_clicked_at": now if target["link_clicked"] else None,
+            "attachment_opened_at": now if target["attachment_opened"] else None,
+        }
+        cur.execute(
+            """
+            INSERT INTO simulation_targets (
+                campaign_id, name, email, phone, department, channel,
+                delivery_status, opened, forwarded, deleted, link_clicked,
+                attachment_opened, delivered_at, opened_at, forwarded_at,
+                deleted_at, link_clicked_at, attachment_opened_at,
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                campaign_id,
+                target["name"],
+                target["email"],
+                target["phone"],
+                target["department"],
+                target["channel"],
+                target["delivery_status"],
+                target["opened"],
+                target["forwarded"],
+                target["deleted"],
+                target["link_clicked"],
+                target["attachment_opened"],
+                timestamps["delivered_at"],
+                timestamps["opened_at"],
+                timestamps["forwarded_at"],
+                timestamps["deleted_at"],
+                timestamps["link_clicked_at"],
+                timestamps["attachment_opened_at"],
+                now,
+                now,
+            ),
+        )
+        target_id = cur.lastrowid
+
+        for event_type, timestamp_key in event_map:
+            if event_type == "delivered" or target.get(event_type):
+                cur.execute(
+                    """
+                    INSERT INTO simulation_events (
+                        campaign_id, target_id, channel, event_type,
+                        delivery_status, occurred_at, metadata
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        campaign_id,
+                        target_id,
+                        target["channel"],
+                        event_type,
+                        target["delivery_status"],
+                        timestamps[timestamp_key] or now,
+                        '{"source":"seed","authorized_training":true}',
+                    ),
+                )
+
+    provider_rows = [
+        (
+            "Local Demo Provider",
+            "local",
+            "local-simulation-model",
+            "http://localhost:11434",
+            1,
+            "Seeded local provider placeholder; no API key required.",
+        ),
+        (
+            "Cloud Demo Provider",
+            "cloud",
+            "cloud-awareness-model",
+            "https://api.example.test/v1",
+            0,
+            "Seeded cloud provider placeholder; configure credentials in the UI later.",
+        ),
+    ]
+    for name, provider_type, model_name, base_url, enabled, description in provider_rows:
+        cur.execute(
+            """
+            INSERT INTO ai_provider_configs (
+                name, provider_type, model_name, base_url, enabled,
+                secret_placeholder, description, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name,
+                provider_type,
+                model_name,
+                base_url,
+                enabled,
+                "not-configured",
+                description,
+                now,
+                now,
+            ),
+        )
 
 def migrate_db(database_path):
     """Initialize or migrate database to latest schema"""
@@ -275,6 +489,139 @@ def migrate_db(database_path):
             FOREIGN KEY (template_id) REFERENCES templates(id)
         )
     """)
+
+    # ============= SIMULATION CENTER PROTOTYPE (Phase 01) =============
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS simulation_campaigns (
+            id INTEGER PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            description TEXT,
+            channel TEXT NOT NULL DEFAULT 'email',
+            status TEXT NOT NULL DEFAULT 'draft',
+            authorized_scope TEXT,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _ensure_columns(cur, "simulation_campaigns", {
+        "slug": "TEXT",
+        "name": "TEXT",
+        "description": "TEXT",
+        "channel": "TEXT NOT NULL DEFAULT 'email'",
+        "status": "TEXT NOT NULL DEFAULT 'draft'",
+        "authorized_scope": "TEXT",
+        "started_at": "TIMESTAMP",
+        "completed_at": "TIMESTAMP",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS simulation_targets (
+            id INTEGER PRIMARY KEY,
+            campaign_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            email TEXT,
+            phone TEXT,
+            department TEXT,
+            channel TEXT NOT NULL,
+            delivery_status TEXT NOT NULL DEFAULT 'pending',
+            opened BOOLEAN NOT NULL DEFAULT 0,
+            forwarded BOOLEAN NOT NULL DEFAULT 0,
+            deleted BOOLEAN NOT NULL DEFAULT 0,
+            link_clicked BOOLEAN NOT NULL DEFAULT 0,
+            attachment_opened BOOLEAN NOT NULL DEFAULT 0,
+            delivered_at TIMESTAMP,
+            opened_at TIMESTAMP,
+            forwarded_at TIMESTAMP,
+            deleted_at TIMESTAMP,
+            link_clicked_at TIMESTAMP,
+            attachment_opened_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (campaign_id) REFERENCES simulation_campaigns(id)
+        )
+    """)
+    _ensure_columns(cur, "simulation_targets", {
+        "campaign_id": "INTEGER",
+        "name": "TEXT",
+        "email": "TEXT",
+        "phone": "TEXT",
+        "department": "TEXT",
+        "channel": "TEXT NOT NULL DEFAULT 'email'",
+        "delivery_status": "TEXT NOT NULL DEFAULT 'pending'",
+        "opened": "BOOLEAN NOT NULL DEFAULT 0",
+        "forwarded": "BOOLEAN NOT NULL DEFAULT 0",
+        "deleted": "BOOLEAN NOT NULL DEFAULT 0",
+        "link_clicked": "BOOLEAN NOT NULL DEFAULT 0",
+        "attachment_opened": "BOOLEAN NOT NULL DEFAULT 0",
+        "delivered_at": "TIMESTAMP",
+        "opened_at": "TIMESTAMP",
+        "forwarded_at": "TIMESTAMP",
+        "deleted_at": "TIMESTAMP",
+        "link_clicked_at": "TIMESTAMP",
+        "attachment_opened_at": "TIMESTAMP",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS simulation_events (
+            id INTEGER PRIMARY KEY,
+            campaign_id INTEGER NOT NULL,
+            target_id INTEGER,
+            channel TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            delivery_status TEXT,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (campaign_id) REFERENCES simulation_campaigns(id),
+            FOREIGN KEY (target_id) REFERENCES simulation_targets(id)
+        )
+    """)
+    _ensure_columns(cur, "simulation_events", {
+        "campaign_id": "INTEGER",
+        "target_id": "INTEGER",
+        "channel": "TEXT NOT NULL DEFAULT 'email'",
+        "event_type": "TEXT",
+        "delivery_status": "TEXT",
+        "occurred_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "metadata": "TEXT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ai_provider_configs (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            provider_type TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            base_url TEXT,
+            enabled BOOLEAN NOT NULL DEFAULT 0,
+            secret_placeholder TEXT,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _ensure_columns(cur, "ai_provider_configs", {
+        "name": "TEXT",
+        "provider_type": "TEXT NOT NULL DEFAULT 'local'",
+        "model_name": "TEXT",
+        "base_url": "TEXT",
+        "enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "secret_placeholder": "TEXT",
+        "description": "TEXT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    _seed_simulation_demo(cur)
     
     conn.commit()
     conn.close()
