@@ -80,6 +80,15 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Secret placeholder", ai_settings.data)
         self.assertIn(b"Save Provider", ai_settings.data)
 
+    def test_admin_dashboard_links_to_simulation_pages(self):
+        response = self.client.get("/creds")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Simulation Center", response.data)
+        self.assertIn(b"location.href='/simulations'", response.data)
+        self.assertIn(b"AI Settings", response.data)
+        self.assertIn(b"location.href='/ai-settings'", response.data)
+
     def test_metrics_api_returns_seeded_channel_data(self):
         response = self.client.get("/api/simulations/metrics")
         payload = response.get_json()

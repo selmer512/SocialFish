@@ -66,10 +66,16 @@ This phase creates a self-contained working prototype for a UI-first Cybersecuri
   - Added route smoke assertions in `tests/test_simulation_routes.py` for the required rendered UI sections and secret placeholder language.
   - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service tests.test_simulation_routes`.
 
-- [ ] Wire the new pages into the existing UI:
+- [x] Wire the new pages into the existing UI:
   - Add navigation links to Simulation Center and AI Settings wherever the current admin navigation is maintained
   - Keep the new features discoverable from the authenticated admin flow
   - Avoid removing or renaming existing routes unless a conflict is discovered and documented in code comments
+
+  Completion notes:
+  - Added Simulation Center and AI Settings buttons to the existing authenticated admin dashboard Easy Access cluster in `templates/admin/index.html`.
+  - Kept the existing `/simulations`, `/ai-settings`, and other routes unchanged; no route conflicts were found.
+  - Added route smoke coverage that verifies `/creds` exposes both new navigation links after authentication.
+  - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service tests.test_simulation_routes`.
 
 - [ ] Add automated smoke coverage for the new prototype:
   - Create focused tests or a lightweight smoke script that initializes the database, authenticates with a test client or controlled app context, verifies `/simulations` and `/ai-settings` render successfully, and verifies the metrics JSON contains seeded email/SMS/voice campaign data
