@@ -1,0 +1,54 @@
+# Phase 01: Simulation Center Prototype
+
+This phase creates a self-contained working prototype for a UI-first Cybersecurity Team simulation center inside the existing Flask application. It establishes the foundation for authorized awareness campaigns, AI provider configuration, and multi-channel metrics without requiring external credentials or user decisions.
+
+## Tasks
+
+- [x] Inspect the existing Flask routes, database helpers, templates, and admin navigation before making changes, then choose integration points that match current SocialFish patterns rather than creating a separate app or CLI-only workflow.
+
+  Completion notes:
+  - No `CLAUDE.md` or `AGENTS.md` file was present in the project root.
+  - Existing integration points are the single Flask entrypoint `SocialFish.py`, request-scoped SQLite connection `g.db`, authenticated routes decorated with `@flask_login.login_required`, and admin templates under `templates/admin/`.
+  - Database work should extend `core/db_migration.py` because normal startup already runs `initDB(DATABASE)` and then `migrate_db(DATABASE)` in `main()`.
+  - New service code should live under `core/` and accept/use the existing SQLite connection style instead of opening an unrelated app or CLI workflow.
+  - Navigation should be added to the existing admin dashboard button cluster in `templates/admin/index.html`; secondary pages currently use copied Bootstrap 4 assets and `/creds` breadcrumb/back-link conventions rather than a shared base template.
+
+- [ ] Add a database migration path for the simulation prototype:
+  - Create or extend a migration helper that safely creates tables for `simulation_campaigns`, `simulation_targets`, `simulation_events`, and `ai_provider_configs`
+  - Include fields for channel (`email`, `sms`, `voice`), delivery status, opened, forwarded, deleted, link clicked, attachment opened, timestamps, provider type, model name, base URL, and enabled state
+  - Seed one clearly labeled authorized training demo campaign with sample targets and sample metrics so the UI has meaningful data immediately
+  - Ensure the migration is idempotent and runs from the normal application startup path
+
+- [ ] Implement a small service layer for simulation metrics and AI configuration:
+  - Add functions for listing campaigns, calculating aggregate delivery/open/click/attachment metrics, recording simulation events, and listing/updating AI provider settings
+  - Keep provider support implementation-neutral with local and cloud provider records, but do not require real API keys in Phase 01
+  - Reuse existing SQLite connection patterns and avoid duplicating database access logic where helpers already exist
+
+- [ ] Add authenticated Flask routes for the prototype:
+  - `GET /simulations` renders the Simulation Center dashboard
+  - `GET /api/simulations/metrics` returns campaign and channel metrics as JSON
+  - `POST /api/simulations/events` records lab/demo events for delivery, open, forward, delete, link click, and attachment open
+  - `GET /ai-settings` renders a GUI for model/provider configuration
+  - `POST /api/ai-settings` saves provider configuration without exposing secrets in rendered pages or JSON responses
+
+- [ ] Create integrated admin UI templates for the prototype:
+  - Add `templates/admin/simulations.html` with campaign summary cards, channel breakdowns for email/SMS/voice, and a target activity table
+  - Add `templates/admin/ai_settings.html` with GUI-managed local/cloud provider options, model name, base URL, enabled state, and secret placeholder handling
+  - Use the existing Bootstrap/static asset conventions and current admin template style
+  - Include visible safety language that frames all workflows as authorized internal training simulations
+
+- [ ] Wire the new pages into the existing UI:
+  - Add navigation links to Simulation Center and AI Settings wherever the current admin navigation is maintained
+  - Keep the new features discoverable from the authenticated admin flow
+  - Avoid removing or renaming existing routes unless a conflict is discovered and documented in code comments
+
+- [ ] Add automated smoke coverage for the new prototype:
+  - Create focused tests or a lightweight smoke script that initializes the database, authenticates with a test client or controlled app context, verifies `/simulations` and `/ai-settings` render successfully, and verifies the metrics JSON contains seeded email/SMS/voice campaign data
+  - Include a check that saved AI provider configuration does not echo secrets back in API responses
+
+- [ ] Verify the Phase 01 prototype end to end:
+  - Install any missing dependencies listed in `requirements.txt` only if needed for the existing app to import
+  - Run the database migration or app startup path
+  - Run the smoke tests or script added in this phase
+  - Start the Flask app locally with test credentials and confirm the new authenticated routes return HTTP 200 using automated requests
+  - Record any command needed to launch the prototype in existing project documentation while keeping configuration UI-first
