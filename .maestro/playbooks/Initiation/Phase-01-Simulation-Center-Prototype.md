@@ -26,10 +26,17 @@ This phase creates a self-contained working prototype for a UI-first Cybersecuri
   - Added `tests/test_simulation_migration.py` to verify schema creation, channel coverage, sample metrics, provider placeholders, and idempotent reruns.
   - Verified with `python -m unittest tests.test_simulation_migration`.
 
-- [ ] Implement a small service layer for simulation metrics and AI configuration:
+- [x] Implement a small service layer for simulation metrics and AI configuration:
   - Add functions for listing campaigns, calculating aggregate delivery/open/click/attachment metrics, recording simulation events, and listing/updating AI provider settings
   - Keep provider support implementation-neutral with local and cloud provider records, but do not require real API keys in Phase 01
   - Reuse existing SQLite connection patterns and avoid duplicating database access logic where helpers already exist
+
+  Completion notes:
+  - Added `core/simulation_service.py` with connection-based helpers for campaign summaries, target activity, aggregate/channel metrics, event recording, and AI provider listing/updating.
+  - Event recording validates supported lab/demo event types, writes to `simulation_events`, updates target rollup fields/timestamps, and reuses the caller's SQLite connection.
+  - AI provider updates keep local/cloud provider records implementation-neutral and intentionally do not store or return secret material; a secret input only toggles a configured placeholder.
+  - Added `tests/test_simulation_service.py` to verify seeded metrics, channel breakdowns, target booleans, event rollups, unsupported event validation, and secret-safe provider responses.
+  - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service`.
 
 - [ ] Add authenticated Flask routes for the prototype:
   - `GET /simulations` renders the Simulation Center dashboard
