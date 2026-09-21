@@ -58,10 +58,13 @@
                         <div class="col col-md-3"><label class="form-control-label">Channels</label></div>
                         <div class="col-12 col-md-9">
                             {% for channel in channels %}
-                            <label class="checkbox-inline mr-3">
-                                <input type="checkbox" name="selected_channels" value="{{ channel }}" {% if not campaign and channel == "email" %}checked{% endif %}> {{ channel|upper }}
+                            <label class="checkbox-inline mr-3" title="{{ channel|title }} training channel">
+                                <input type="checkbox" name="selected_channels" value="{{ channel }}" {% if (not campaign and channel == "email") or (campaign and campaign.selected_channels and channel in campaign.selected_channels) %}checked{% endif %}>
+                                {% if channel == "email" %}<i class="fas fa-envelope"></i>{% elif channel == "sms" %}<i class="fas fa-sms"></i>{% else %}<i class="fas fa-phone"></i>{% endif %}
+                                {{ channel|upper }}
                             </label>
                             {% endfor %}
+                            <small class="form-text text-muted">Select every channel available for this campaign; targets can still use a single channel each.</small>
                         </div>
                     </div>
                     <div class="row form-group">
@@ -82,6 +85,9 @@
                         <div class="col-12 col-md-9"><textarea name="authorized_scope" rows="3" class="form-control">{{ campaign.authorized_scope if campaign else '' }}</textarea></div>
                     </div>
                     <div class="card-footer" style="text-align: right;">
+                        <a href="/simulations/campaigns" class="btn btn-secondary btn-sm">
+                            <i class="fas fa-times"></i> Cancel
+                        </a>
                         <button type="submit" class="btn btn-primary btn-sm">
                             <i class="fa fa-dot-circle-o"></i> Create Campaign
                         </button>

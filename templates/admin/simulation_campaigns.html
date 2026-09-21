@@ -29,6 +29,9 @@
                 <div class="row">
                     <div class="col-md-8">
                         <h3 class="title-5 m-b-35">Campaign Management</h3>
+                        <p class="form-text text-muted">
+                            Create, edit, and reuse authorized training campaigns across email, SMS, and voice channels.
+                        </p>
                     </div>
                     <div class="col-md-4" style="text-align: right;">
                         <a class="btn btn-primary btn-sm" href="/simulations/campaigns/new">
@@ -56,11 +59,22 @@
                                 <td>
                                     <strong>{{ campaign.name }}</strong>
                                     <br>
-                                    <small class="form-text text-muted">{{ campaign.objective or campaign.description }}</small>
+                                    <small class="form-text text-muted">{{ campaign.objective or campaign.description or "No objective recorded yet." }}</small>
+                                    {% if campaign.training_owner %}
+                                    <small class="form-text text-muted">Owner: {{ campaign.training_owner }}</small>
+                                    {% endif %}
+                                    {% if campaign.start_date or campaign.end_date %}
+                                    <small class="form-text text-muted">
+                                        Window: {{ campaign.start_date or "unscheduled" }} to {{ campaign.end_date or "unscheduled" }}
+                                    </small>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     {% for channel in campaign.selected_channels %}
-                                    <span class="badge badge-secondary">{{ channel }}</span>
+                                    <span class="badge badge-secondary">
+                                        {% if channel == "email" %}<i class="fas fa-envelope"></i>{% elif channel == "sms" %}<i class="fas fa-sms"></i>{% else %}<i class="fas fa-phone"></i>{% endif %}
+                                        {{ channel|upper }}
+                                    </span>
                                     {% endfor %}
                                 </td>
                                 <td><span class="badge badge-info">{{ campaign.status }}</span></td>

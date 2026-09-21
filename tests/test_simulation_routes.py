@@ -194,6 +194,11 @@ class SimulationRoutesTest(unittest.TestCase):
         detail_response = self.client.get("/simulations/campaigns/{}".format(campaign_id))
         self.assertEqual(detail_response.status_code, 200)
         self.assertIn(b"Edit Campaign", detail_response.data)
+        self.assertIn(b"Add Targets", detail_response.data)
+        self.assertIn(b"Manual Target Entry", detail_response.data)
+        self.assertIn(b"CSV Upload", detail_response.data)
+        self.assertIn(b"Expected columns", detail_response.data)
+        self.assertIn(b'name="targets_csv"', detail_response.data)
         self.assertIn(b"Targets", detail_response.data)
         self.assertIn(b"Events", detail_response.data)
         self.assertIn(b"Archive", detail_response.data)
@@ -316,6 +321,8 @@ class SimulationRoutesTest(unittest.TestCase):
         )
         self.assertEqual(update_response.status_code, 200)
         self.assertIn(b"Target Route Target Updated updated.", update_response.data)
+        self.assertIn(b'name="source" value="manual"', update_response.data)
+        self.assertIn(b"Route Target Updated", update_response.data)
 
         archive_response = self.client.post(
             "/simulations/targets/{}/archive".format(target_id),
@@ -370,6 +377,9 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Imported 2 target(s) with 1 validation error(s).", response.data)
         self.assertIn(b"CSV row 3: Email channel targets require an email address.", response.data)
+        self.assertIn(b"Import Validation Feedback", response.data)
+        self.assertIn(b"route-targets.csv", response.data)
+        self.assertIn(b"Row 3: Email channel targets require an email address.", response.data)
 
         conn = sqlite3.connect(self.db_path)
         try:

@@ -42,6 +42,16 @@
                     <div class="col-md-3"><strong>{{ metrics.aggregate.opened }}</strong><br><small>Opened</small></div>
                     <div class="col-md-3"><strong>{{ metrics.aggregate.link_clicked }}</strong><br><small>Clicked</small></div>
                 </div>
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <small class="form-text text-muted">Owner: {{ campaign.training_owner or "Not assigned" }}</small>
+                        <small class="form-text text-muted">Objective: {{ campaign.objective or "Not recorded" }}</small>
+                    </div>
+                    <div class="col-md-6">
+                        <small class="form-text text-muted">Landing URL: {{ campaign.landing_url or "Not configured" }}</small>
+                        <small class="form-text text-muted">Training URL: {{ campaign.training_url or "Not configured" }}</small>
+                    </div>
+                </div>
                 <hr>
                 <h4 class="mb-3">Edit Campaign</h4>
                 <form action="/simulations/campaigns/{{ campaign.id }}" method="POST" class="form-horizontal">
@@ -76,7 +86,9 @@
                         <div class="col-12 col-md-9">
                             {% for channel in channels %}
                             <label class="checkbox-inline mr-3">
-                                <input type="checkbox" name="selected_channels" value="{{ channel }}" {% if channel in campaign.selected_channels %}checked{% endif %}> {{ channel|upper }}
+                                <input type="checkbox" name="selected_channels" value="{{ channel }}" {% if channel in campaign.selected_channels %}checked{% endif %}>
+                                {% if channel == "email" %}<i class="fas fa-envelope"></i>{% elif channel == "sms" %}<i class="fas fa-sms"></i>{% else %}<i class="fas fa-phone"></i>{% endif %}
+                                {{ channel|upper }}
                             </label>
                             {% endfor %}
                         </div>
@@ -105,24 +117,190 @@
                     </div>
                 </form>
                 <hr>
+                <h4 class="mb-3">Add Targets</h4>
+                <div class="row">
+                    <div class="col-md-6">
+                        <form action="/simulations/campaigns/{{ campaign.id }}/targets" method="POST" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 20px;">
+                            <h5 class="mb-3"><i class="fas fa-user-plus"></i> Manual Target Entry</h5>
+                            <div class="row form-group">
+                                <div class="col col-md-4"><label class="form-control-label">Name</label></div>
+                                <div class="col-12 col-md-8"><input type="text" name="name" class="form-control" required></div>
+                            </div>
+                            <div class="row form-group">
+                                <div class="col col-md-4"><label class="form-control-label">Display Name</label></div>
+                                <div class="col-12 col-md-8"><input type="text" name="display_name" class="form-control"></div>
+                            </div>
+                            <div class="row form-group">
+                                <div class="col col-md-4"><label class="form-control-label">Email</label></div>
+                                <div class="col-12 col-md-8"><input type="email" name="email" class="form-control"></div>
+                            </div>
+                            <div class="row form-group">
+                                <div class="col col-md-4"><label class="form-control-label">Phone</label></div>
+                                <div class="col-12 col-md-8"><input type="tel" name="phone" class="form-control"></div>
+                            </div>
+                            <div class="row form-group">
+                                <div class="col col-md-4"><label class="form-control-label">Department</label></div>
+                                <div class="col-12 col-md-8"><input type="text" name="department" class="form-control"></div>
+                            </div>
+                            <div class="row form-group">
+                                <div class="col col-md-4"><label class="form-control-label">Manager</label></div>
+                                <div class="col-12 col-md-8"><input type="text" name="manager" class="form-control"></div>
+                            </div>
+                            <div class="row form-group">
+                                <div class="col col-md-4"><label class="form-control-label">Channel</label></div>
+                                <div class="col-12 col-md-8">
+                                    <select name="channel" class="form-control">
+                                        {% for channel in channels %}
+                                        <option value="{{ channel }}" {% if channel == campaign.channel %}selected{% endif %}>{{ channel|upper }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row form-group">
+                                <div class="col col-md-4"><label class="form-control-label">Active</label></div>
+                                <div class="col-12 col-md-8">
+                                    <label class="switch switch-text switch-info switch-pill">
+                                        <input type="checkbox" name="active" class="switch-input" checked>
+                                        <span data-on="On" data-off="Off" class="switch-label"></span>
+                                        <span class="switch-handle"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div style="text-align: right;">
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-plus"></i> Add Target
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="col-md-6">
+                        <form action="/simulations/campaigns/{{ campaign.id }}/targets/upload" method="POST" enctype="multipart/form-data" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 20px;">
+                            <h5 class="mb-3"><i class="fas fa-file-csv"></i> CSV Upload</h5>
+                            <div class="alert alert-secondary" role="alert">
+                                <strong>Expected columns:</strong> name, email, phone, channel<br>
+                                <strong>Optional columns:</strong> display_name, department, manager, active
+                            </div>
+                            <div class="row form-group">
+                                <div class="col col-md-4"><label class="form-control-label">CSV File</label></div>
+                                <div class="col-12 col-md-8"><input type="file" name="targets_csv" accept=".csv,text/csv" class="form-control" required></div>
+                            </div>
+                            <small class="form-text text-muted">
+                                Validation feedback appears below with row numbers and display-ready reasons.
+                            </small>
+                            <div style="text-align: right; margin-top: 16px;">
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-upload"></i> Import CSV
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                {% if import_batches %}
+                <h4 class="mb-3">Import Validation Feedback</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr><th>File</th><th>Status</th><th>Rows</th><th>Imported</th><th>Validation Errors</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for batch in import_batches %}
+                            <tr class="tr-shadow">
+                                <td>
+                                    {{ batch.original_filename or "Uploaded CSV" }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ batch.created_at }}</small>
+                                </td>
+                                <td><span class="badge badge-info">{{ batch.status }}</span></td>
+                                <td>{{ batch.total_rows }} total / {{ batch.valid_rows }} valid / {{ batch.invalid_rows }} invalid</td>
+                                <td>{{ batch.imported_rows }}</td>
+                                <td>
+                                    {% if batch.validation_errors %}
+                                    <ul class="mb-0">
+                                        {% for error in batch.validation_errors %}
+                                        <li>Row {{ error.row }}: {{ error.message }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                    {% else %}
+                                    No validation errors.
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <hr>
+                {% endif %}
                 <h4 class="mb-3">Targets</h4>
                 <div class="table-responsive table-responsive-data2">
                     <table class="table table-data2">
                         <thead>
-                            <tr><th>Name</th><th>Contact</th><th>Channel</th><th>Status</th><th>Source</th></tr>
+                            <tr><th>Name</th><th>Contact</th><th>Details</th><th>Channel</th><th>Status</th><th>Source</th><th>Actions</th></tr>
                         </thead>
                         <tbody>
                             {% for target in targets %}
                             <tr class="tr-shadow">
-                                <td>{{ target.display_name or target.name }}</td>
-                                <td>{{ target.email or target.phone }}</td>
+                                <td>
+                                    {{ target.display_name or target.name }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ target.name }}</small>
+                                </td>
+                                <td>
+                                    {{ target.email or "No email" }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ target.phone or "No phone" }}</small>
+                                </td>
+                                <td>
+                                    {{ target.department or "No department" }}
+                                    <br>
+                                    <small class="form-text text-muted">Manager: {{ target.manager or "Not recorded" }}</small>
+                                </td>
                                 <td><span class="badge badge-secondary">{{ target.channel }}</span></td>
-                                <td>{{ target.delivery_status }}</td>
+                                <td>
+                                    {{ target.delivery_status }}
+                                    {% if target.archived %}
+                                    <br><span class="badge badge-warning">Archived</span>
+                                    {% elif target.active %}
+                                    <br><span class="badge badge-success">Active</span>
+                                    {% else %}
+                                    <br><span class="badge badge-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ target.source }}</td>
+                                <td>
+                                    <form action="/simulations/targets/{{ target.id }}" method="POST" class="form-horizontal" style="min-width: 260px;">
+                                        <input type="hidden" name="source" value="{{ target.source }}">
+                                        <div class="form-group mb-1"><input type="text" name="name" value="{{ target.name }}" class="form-control form-control-sm" required></div>
+                                        <div class="form-group mb-1"><input type="text" name="display_name" value="{{ target.display_name }}" class="form-control form-control-sm"></div>
+                                        <div class="form-group mb-1"><input type="email" name="email" value="{{ target.email }}" class="form-control form-control-sm" placeholder="email"></div>
+                                        <div class="form-group mb-1"><input type="tel" name="phone" value="{{ target.phone }}" class="form-control form-control-sm" placeholder="phone"></div>
+                                        <div class="form-group mb-1"><input type="text" name="department" value="{{ target.department }}" class="form-control form-control-sm" placeholder="department"></div>
+                                        <div class="form-group mb-1"><input type="text" name="manager" value="{{ target.manager }}" class="form-control form-control-sm" placeholder="manager"></div>
+                                        <div class="form-group mb-1">
+                                            <select name="channel" class="form-control form-control-sm">
+                                                {% for channel in channels %}
+                                                <option value="{{ channel }}" {% if target.channel == channel %}selected{% endif %}>{{ channel|upper }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <label class="checkbox-inline mr-2"><input type="checkbox" name="active" value="true" {% if target.active and not target.archived %}checked{% endif %}> Active</label>
+                                        <button type="submit" class="btn btn-primary btn-sm" title="Save target">
+                                            <i class="fas fa-save"></i>
+                                        </button>
+                                    </form>
+                                    {% if not target.archived %}
+                                    <form action="/simulations/targets/{{ target.id }}/archive" method="POST" style="margin-top: 6px;">
+                                        <button type="submit" class="btn btn-danger btn-sm" title="Archive target">
+                                            <i class="fas fa-archive"></i> Archive
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                </td>
                             </tr>
                             <tr class="spacer"></tr>
                             {% else %}
-                            <tr><td colspan="5">No targets have been added to this campaign.</td></tr>
+                            <tr><td colspan="7">No targets have been added to this campaign.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>

@@ -64,12 +64,18 @@ This phase turns the prototype into a usable campaign management workflow for th
   - CSV uploads accept `targets_csv` or `csv_file`, call `import_targets_csv`, record import batches, and flash the first row-numbered validation errors for display on the campaign detail page.
   - Manual target validation remains centralized in `core/simulation_service.py`; route tests cover success, validation failures, archive preservation, and import batch accounting.
 
-- [ ] Build campaign and target UI templates:
+- [x] Build campaign and target UI templates:
   - Create list, create, and detail templates under `templates/admin/` using the existing Bootstrap style
   - Include channel checkboxes for email, SMS, and voice
   - Include manual target entry and CSV upload flows on the campaign detail page
   - Include import validation feedback with row numbers and reasons
   - Keep all configuration available through the UI and avoid CLI instructions for campaign setup
+
+  Notes for follow-on tasks:
+  - `templates/admin/simulation_campaigns.html` now shows richer campaign metadata, channel badges, status, target counts, and metrics while preserving the existing Bootstrap admin style.
+  - `templates/admin/simulation_campaign_form.html` keeps all campaign configuration in the GUI, including email/SMS/voice channel checkboxes, URLs, dates, owner, scope, and status.
+  - `templates/admin/simulation_campaign_detail.html` now includes campaign editing, manual target creation, CSV upload, import batch validation feedback with row numbers, target inline edit forms, target archive actions, and event history.
+  - `tests/test_simulation_routes.py` has render assertions for the new campaign detail controls and CSV validation feedback.
 
 - [ ] Add CSV import sample guidance inside the UI:
   - Render expected columns and optional columns directly on the upload panel
