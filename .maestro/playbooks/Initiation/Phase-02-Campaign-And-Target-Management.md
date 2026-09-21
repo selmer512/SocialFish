@@ -99,7 +99,12 @@ This phase turns the prototype into a usable campaign management workflow for th
   - `tests/test_simulation_service.py` now verifies archived campaigns and targets remain available through campaign detail, metrics, and event history queries.
   - Verification passed with `python -m unittest discover -s tests` on 2026-09-21.
 
-- [ ] Run the campaign workflow verification:
+- [x] Run the campaign workflow verification:
   - Run the new tests or smoke script
   - Start the app and use automated HTTP requests to create a campaign, add one manual target, import a CSV fixture, and fetch the campaign detail page
   - Fix any import, template, route, or database errors discovered during verification
+
+  Notes:
+  - Verification passed with `python -m unittest discover -s tests` on 2026-09-21; 26 tests ran successfully.
+  - Live HTTP smoke verification passed against a temporary working database under `.maestro/playbooks/Working/campaign-workflow-smoke`: logged in, created `HTTP Smoke Campaign`, added `Manual Target`, imported `CSV Target` and `CSV Phone Target`, and fetched the campaign detail page containing all expected records.
+  - The isolated smoke launch needs `templates/static/token/` present under its temporary process working directory because startup QR generation writes that relative path; no application code change was required.
