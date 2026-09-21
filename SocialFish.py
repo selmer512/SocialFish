@@ -15,11 +15,15 @@ from core.genReport import genReport
 from core.report import generate_unique
 from core.db_migration import migrate_db
 from core.simulation_service import (
+    archive_campaign,
+    create_campaign,
     get_campaign_metrics,
+    get_campaign_detail,
     list_ai_provider_settings,
     list_campaigns,
     list_targets,
     record_simulation_event,
+    update_campaign,
     update_ai_provider_settings,
 )
 from core.tunnel_manager import TunnelManager
@@ -121,6 +125,30 @@ def _form_bool(value):
     if isinstance(value, bool):
         return value
     return str(value).lower() in ("1", "true", "yes", "on")
+
+
+def _request_channels():
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        return data.get("selected_channels") or data.get("channels")
+    return request.form.getlist("selected_channels") or request.form.getlist("channels")
+
+
+def _campaign_payload():
+    data = _request_data()
+    return {
+        "name": data.get("name"),
+        "description": data.get("description"),
+        "objective": data.get("objective"),
+        "training_owner": data.get("training_owner"),
+        "status": data.get("status") or "draft",
+        "selected_channels": _request_channels(),
+        "landing_url": data.get("landing_url"),
+        "training_url": data.get("training_url"),
+        "start_date": data.get("start_date"),
+        "end_date": data.get("end_date"),
+        "authorized_scope": data.get("authorized_scope"),
+    }
 
 # Conta o numero de credenciais salvas no banco
 def countCreds():
@@ -348,6 +376,89 @@ def simulations_dashboard():
         metrics=metrics,
         targets=targets,
     )
+
+
+@app.route("/simulations/campaigns", methods=['GET'])
+@flask_login.login_required
+def simulation_campaigns():
+    campaigns = list_campaigns(g.db)
+    for campaign in campaigns:
+        campaign["metrics"] = get_campaign_metrics(g.db, campaign["id"])["aggregate"]
+    return render_template(
+        'admin/simulation_campaigns.html',
+        campaigns=campaigns,
+    )
+
+
+@app.route("/simulations/campaigns/new", methods=['GET'])
+@flask_login.login_required
+def new_simulation_campaign():
+    return render_template(
+        'admin/simulation_campaign_form.html',
+        campaign=None,
+        statuses=("draft", "active", "paused", "completed"),
+        channels=("email", "sms", "voice"),
+    )
+
+
+@app.route("/simulations/campaigns", methods=['POST'])
+@flask_login.login_required
+def create_simulation_campaign():
+    try:
+        campaign = create_campaign(g.db, **_campaign_payload())
+        flash("Campaign created for authorized internal training.", "success")
+        return redirect("/simulations/campaigns/{}".format(campaign["id"]))
+    except (TypeError, ValueError) as e:
+        flash(str(e), "danger")
+        return render_template(
+            'admin/simulation_campaign_form.html',
+            campaign=_request_data(),
+            statuses=("draft", "active", "paused", "completed"),
+            channels=("email", "sms", "voice"),
+        ), 400
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>", methods=['GET'])
+@flask_login.login_required
+def simulation_campaign_detail(campaign_id):
+    try:
+        detail = get_campaign_detail(g.db, campaign_id)
+    except ValueError as e:
+        flash(str(e), "danger")
+        return redirect("/simulations/campaigns")
+    return render_template(
+        'admin/simulation_campaign_detail.html',
+        campaign=detail["campaign"],
+        targets=detail["targets"],
+        events=detail["events"],
+        metrics=detail["metrics"],
+        import_batches=detail["import_batches"],
+        statuses=("draft", "active", "paused", "completed"),
+        channels=("email", "sms", "voice"),
+    )
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>", methods=['POST'])
+@flask_login.login_required
+def update_simulation_campaign(campaign_id):
+    try:
+        campaign = update_campaign(g.db, campaign_id, **_campaign_payload())
+        flash("Campaign metadata updated.", "success")
+        return redirect("/simulations/campaigns/{}".format(campaign["id"]))
+    except (TypeError, ValueError) as e:
+        flash(str(e), "danger")
+        return redirect("/simulations/campaigns/{}".format(campaign_id))
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>/archive", methods=['POST'])
+@flask_login.login_required
+def archive_simulation_campaign(campaign_id):
+    try:
+        archive_campaign(g.db, campaign_id)
+        flash("Campaign archived. Historical metrics were preserved.", "success")
+    except ValueError as e:
+        flash(str(e), "danger")
+    return redirect("/simulations/campaigns")
 
 
 @app.route("/api/simulations/metrics", methods=['GET'])

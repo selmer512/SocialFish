@@ -38,13 +38,19 @@ This phase turns the prototype into a usable campaign management workflow for th
   - Email addresses are normalized to lowercase, phone numbers are normalized to compact E.164-like digits/leading `+`, and channel-specific contact requirements are enforced for email, SMS, and voice.
   - `tests/test_simulation_service.py` covers campaign CRUD/archive/detail, manual target validation/archive, CSV parse errors, duplicate contact handling, and import batch accounting.
 
-- [ ] Add authenticated campaign management routes:
+- [x] Add authenticated campaign management routes:
   - `GET /simulations/campaigns` lists campaigns with channel, status, target count, and key metrics
   - `GET /simulations/campaigns/new` renders the create campaign form
   - `POST /simulations/campaigns` creates a campaign from GUI input
   - `GET /simulations/campaigns/<id>` renders a detail page with targets, events, and edit actions
   - `POST /simulations/campaigns/<id>` updates campaign metadata
   - `POST /simulations/campaigns/<id>/archive` archives a campaign without deleting historical metrics
+
+  Notes for follow-on tasks:
+  - `SocialFish.py` now provides authenticated list, new, create, detail, update, and archive routes under `/simulations/campaigns`, using `flash` plus redirects for displayable GUI success/error states.
+  - `core/simulation_service.py` now exposes `list_simulation_events` and includes `events` in `get_campaign_detail` so campaign detail pages can show audit history without route-local SQL.
+  - Minimal route-ready templates were added at `templates/admin/simulation_campaigns.html`, `templates/admin/simulation_campaign_form.html`, and `templates/admin/simulation_campaign_detail.html`; the later UI task can expand these surfaces.
+  - `tests/test_simulation_routes.py` covers authenticated campaign page rendering, campaign create/update/detail/archive, validation errors, and preserved archived campaign state.
 
 - [ ] Add authenticated target management routes:
   - `POST /simulations/campaigns/<id>/targets` adds a single target from the UI

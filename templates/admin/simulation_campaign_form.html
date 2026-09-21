@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>SocialFish New Campaign</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqiyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/simulations/campaigns"><i class="fas fa-arrow-left"></i> <strong>SocialFish</strong></a>/New Campaign
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    <strong>Authorized internal training simulations only.</strong>
+                    Create campaign metadata before adding targets or delivery configuration.
+                </div>
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }}" role="alert">{{ message }}</div>
+                {% endfor %}
+                {% endwith %}
+                <h3 class="title-5 m-b-35">Create Campaign</h3>
+                <form action="/simulations/campaigns" method="POST" class="form-horizontal">
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Name</label></div>
+                        <div class="col-12 col-md-9"><input type="text" name="name" value="{{ campaign.name if campaign else '' }}" class="form-control" required></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Description</label></div>
+                        <div class="col-12 col-md-9"><textarea name="description" rows="3" class="form-control">{{ campaign.description if campaign else '' }}</textarea></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Objective</label></div>
+                        <div class="col-12 col-md-9"><input type="text" name="objective" value="{{ campaign.objective if campaign else '' }}" class="form-control"></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Training Owner</label></div>
+                        <div class="col-12 col-md-9"><input type="text" name="training_owner" value="{{ campaign.training_owner if campaign else '' }}" class="form-control"></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Status</label></div>
+                        <div class="col-12 col-md-9">
+                            <select name="status" class="form-control">
+                                {% for status in statuses %}
+                                <option value="{{ status }}" {% if campaign and campaign.status == status %}selected{% endif %}>{{ status|title }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Channels</label></div>
+                        <div class="col-12 col-md-9">
+                            {% for channel in channels %}
+                            <label class="checkbox-inline mr-3">
+                                <input type="checkbox" name="selected_channels" value="{{ channel }}" {% if not campaign and channel == "email" %}checked{% endif %}> {{ channel|upper }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Landing URL</label></div>
+                        <div class="col-12 col-md-9"><input type="url" name="landing_url" value="{{ campaign.landing_url if campaign else '' }}" class="form-control"></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Training URL</label></div>
+                        <div class="col-12 col-md-9"><input type="url" name="training_url" value="{{ campaign.training_url if campaign else '' }}" class="form-control"></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Dates</label></div>
+                        <div class="col-12 col-md-4"><input type="date" name="start_date" value="{{ campaign.start_date if campaign else '' }}" class="form-control"></div>
+                        <div class="col-12 col-md-5"><input type="date" name="end_date" value="{{ campaign.end_date if campaign else '' }}" class="form-control"></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Authorized Scope</label></div>
+                        <div class="col-12 col-md-9"><textarea name="authorized_scope" rows="3" class="form-control">{{ campaign.authorized_scope if campaign else '' }}</textarea></div>
+                    </div>
+                    <div class="card-footer" style="text-align: right;">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="fa fa-dot-circle-o"></i> Create Campaign
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>

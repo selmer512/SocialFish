@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>SocialFish Campaigns</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqiyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/simulations"><i class="fas fa-arrow-left"></i> <strong>SocialFish</strong></a>/Campaign Management
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    <strong>Authorized internal training simulations only.</strong>
+                    Manage reusable campaign records for approved awareness exercises.
+                </div>
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }}" role="alert">{{ message }}</div>
+                {% endfor %}
+                {% endwith %}
+                <div class="row">
+                    <div class="col-md-8">
+                        <h3 class="title-5 m-b-35">Campaign Management</h3>
+                    </div>
+                    <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-primary btn-sm" href="/simulations/campaigns/new">
+                            <i class="fas fa-plus"></i>&nbsp; New Campaign
+                        </a>
+                    </div>
+                </div>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Channels</th>
+                                <th>Status</th>
+                                <th>Targets</th>
+                                <th>Delivered</th>
+                                <th>Opened</th>
+                                <th>Clicked</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for campaign in campaigns %}
+                            <tr class="tr-shadow">
+                                <td>
+                                    <strong>{{ campaign.name }}</strong>
+                                    <br>
+                                    <small class="form-text text-muted">{{ campaign.objective or campaign.description }}</small>
+                                </td>
+                                <td>
+                                    {% for channel in campaign.selected_channels %}
+                                    <span class="badge badge-secondary">{{ channel }}</span>
+                                    {% endfor %}
+                                </td>
+                                <td><span class="badge badge-info">{{ campaign.status }}</span></td>
+                                <td>{{ campaign.target_count }}</td>
+                                <td>{{ campaign.metrics.delivered }}</td>
+                                <td>{{ campaign.metrics.opened }}</td>
+                                <td>{{ campaign.metrics.link_clicked }}</td>
+                                <td>
+                                    <a class="btn btn-secondary btn-sm" href="/simulations/campaigns/{{ campaign.id }}">
+                                        <i class="fas fa-eye"></i>&nbsp; Details
+                                    </a>
+                                </td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="8">No active campaigns yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>

@@ -448,7 +448,40 @@ def get_campaign_detail(conn, campaign_id, include_archived_targets=True):
         "targets": list_targets(conn, campaign_id, include_archived=include_archived_targets),
         "metrics": get_campaign_metrics(conn, campaign_id),
         "import_batches": list_import_batches(conn, campaign_id),
+        "events": list_simulation_events(conn, campaign_id),
     }
+
+
+def list_simulation_events(conn, campaign_id=None):
+    """Return simulation events for campaign detail and audit views."""
+    params = []
+    where = ""
+    if campaign_id is not None:
+        where = "WHERE e.campaign_id = ?"
+        params.append(campaign_id)
+    return _rows_to_dicts(
+        conn.execute(
+            f"""
+            SELECT
+                e.id,
+                e.campaign_id,
+                e.target_id,
+                t.display_name AS target_display_name,
+                t.name AS target_name,
+                e.channel,
+                e.event_type,
+                e.delivery_status,
+                e.occurred_at,
+                e.metadata,
+                e.created_at
+            FROM simulation_events e
+            LEFT JOIN simulation_targets t ON t.id = e.target_id
+            {where}
+            ORDER BY e.occurred_at DESC, e.id DESC
+            """,
+            params,
+        )
+    )
 
 
 def list_targets(conn, campaign_id=None, include_archived=False):
