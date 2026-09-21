@@ -197,7 +197,11 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Add Targets", detail_response.data)
         self.assertIn(b"Manual Target Entry", detail_response.data)
         self.assertIn(b"CSV Upload", detail_response.data)
-        self.assertIn(b"Expected columns", detail_response.data)
+        self.assertIn(b"Required columns", detail_response.data)
+        self.assertIn(b"Optional columns", detail_response.data)
+        self.assertIn(b"Download Sample CSV", detail_response.data)
+        self.assertIn(b"/simulations/targets/sample.csv", detail_response.data)
+        self.assertIn(b"Unknown columns are reported as validation errors.", detail_response.data)
         self.assertIn(b'name="targets_csv"', detail_response.data)
         self.assertIn(b"Targets", detail_response.data)
         self.assertIn(b"Events", detail_response.data)
@@ -266,6 +270,23 @@ class SimulationRoutesTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn(b"Campaign name is required.", response.data)
+
+    def test_target_sample_csv_route_generates_download(self):
+        response = self.client.get("/simulations/targets/sample.csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "text/csv")
+        self.assertIn(
+            "attachment; filename=simulation-target-import-sample.csv",
+            response.headers["Content-Disposition"],
+        )
+        self.assertIn(
+            b"name,display_name,email,phone,department,manager,channel,active\n",
+            response.data,
+        )
+        self.assertIn(b"jordan.rivera@example.test", response.data)
+        self.assertIn(b"+15551234567", response.data)
+        self.assertNotIn(b"route-pass", response.data)
 
     def test_target_management_routes_create_update_and_archive(self):
         campaign_id = self._campaign_id()

@@ -77,10 +77,16 @@ This phase turns the prototype into a usable campaign management workflow for th
   - `templates/admin/simulation_campaign_detail.html` now includes campaign editing, manual target creation, CSV upload, import batch validation feedback with row numbers, target inline edit forms, target archive actions, and event history.
   - `tests/test_simulation_routes.py` has render assertions for the new campaign detail controls and CSV validation feedback.
 
-- [ ] Add CSV import sample guidance inside the UI:
+- [x] Add CSV import sample guidance inside the UI:
   - Render expected columns and optional columns directly on the upload panel
   - Provide a generated downloadable sample CSV route that does not require a static file
   - Document accepted columns in a structured Markdown feature note at `docs/features/simulation-target-import.md` with YAML front matter and wiki-links to `[[Simulation-Campaigns]]` and `[[AI-Provider-Configuration]]`
+
+  Notes for follow-on tasks:
+  - `templates/admin/simulation_campaign_detail.html` now shows required and optional CSV columns, channel-specific contact requirements, unknown-column validation behavior, and a `Download Sample CSV` action on the upload panel.
+  - `SocialFish.py` now provides authenticated `GET /simulations/targets/sample.csv`, generated with the standard library CSV writer and returned as an attachment without a static file.
+  - `docs/features/simulation-target-import.md` documents accepted columns, validation behavior, import-batch audit behavior, and links to `[[Simulation-Campaigns]]` plus `[[AI-Provider-Configuration]]`.
+  - `tests/test_simulation_routes.py` covers the rendered upload guidance and generated sample CSV download.
 
 - [ ] Add automated coverage for campaign and target workflows:
   - Test campaign creation, update, archive, and listing

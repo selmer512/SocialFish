@@ -177,8 +177,17 @@
                         <form action="/simulations/campaigns/{{ campaign.id }}/targets/upload" method="POST" enctype="multipart/form-data" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 20px;">
                             <h5 class="mb-3"><i class="fas fa-file-csv"></i> CSV Upload</h5>
                             <div class="alert alert-secondary" role="alert">
-                                <strong>Expected columns:</strong> name, email, phone, channel<br>
-                                <strong>Optional columns:</strong> display_name, department, manager, active
+                                <strong>Required columns:</strong> {{ target_csv_required_columns|join(", ") }}<br>
+                                <strong>Optional columns:</strong> {{ target_csv_optional_columns|join(", ") }}<br>
+                                <small>
+                                    Email rows need an email address. SMS and voice rows need a phone number.
+                                    Unknown columns are reported as validation errors.
+                                </small>
+                            </div>
+                            <div class="mb-3">
+                                <a href="/simulations/targets/sample.csv" class="btn btn-outline-secondary btn-sm">
+                                    <i class="fas fa-download"></i> Download Sample CSV
+                                </a>
                             </div>
                             <div class="row form-group">
                                 <div class="col col-md-4"><label class="form-control-label">CSV File</label></div>

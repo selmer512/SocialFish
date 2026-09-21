@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-from flask import Flask, request, render_template, render_template_string, jsonify, redirect, g, flash
+from flask import Flask, request, render_template, render_template_string, jsonify, redirect, g, flash, Response
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from core.config import *
 from core.view import head
@@ -15,6 +15,7 @@ from core.genReport import genReport
 from core.report import generate_unique
 from core.db_migration import migrate_db
 from core.simulation_service import (
+    TARGET_CSV_COLUMNS,
     archive_campaign,
     archive_target,
     create_campaign,
@@ -47,10 +48,40 @@ import hashlib
 import asyncio
 import logging
 from pathlib import Path
+from io import StringIO
+import csv
 
 # Configure logging
 logger = logging.getLogger("SocialFish")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+TARGET_CSV_REQUIRED_COLUMNS = ("name",)
+TARGET_CSV_OPTIONAL_COLUMNS = tuple(
+    column for column in ("display_name", "email", "phone", "department", "manager", "channel", "active")
+    if column in TARGET_CSV_COLUMNS
+)
+TARGET_CSV_SAMPLE_ROWS = (
+    {
+        "name": "Jordan Rivera",
+        "display_name": "Jordan",
+        "email": "jordan.rivera@example.test",
+        "phone": "",
+        "department": "Finance",
+        "manager": "Morgan Lee",
+        "channel": "email",
+        "active": "true",
+    },
+    {
+        "name": "Taylor Kim",
+        "display_name": "Taylor",
+        "email": "",
+        "phone": "+15551234567",
+        "department": "Operations",
+        "manager": "Casey Patel",
+        "channel": "sms",
+        "active": "true",
+    },
+)
 
 # Verificar argumentos
 if len(argv) < 2:
@@ -456,6 +487,8 @@ def simulation_campaign_detail(campaign_id):
         import_batches=detail["import_batches"],
         statuses=("draft", "active", "paused", "completed"),
         channels=("email", "sms", "voice"),
+        target_csv_required_columns=TARGET_CSV_REQUIRED_COLUMNS,
+        target_csv_optional_columns=TARGET_CSV_OPTIONAL_COLUMNS,
     )
 
 
@@ -480,6 +513,24 @@ def archive_simulation_campaign(campaign_id):
     except ValueError as e:
         flash(str(e), "danger")
     return redirect("/simulations/campaigns")
+
+
+@app.route("/simulations/targets/sample.csv", methods=['GET'])
+@flask_login.login_required
+def simulation_targets_sample_csv():
+    output = StringIO()
+    fieldnames = TARGET_CSV_REQUIRED_COLUMNS + TARGET_CSV_OPTIONAL_COLUMNS
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(TARGET_CSV_SAMPLE_ROWS)
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=simulation-target-import-sample.csv",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.route("/simulations/campaigns/<int:campaign_id>/targets", methods=['POST'])
