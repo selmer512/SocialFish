@@ -38,12 +38,20 @@ This phase creates a self-contained working prototype for a UI-first Cybersecuri
   - Added `tests/test_simulation_service.py` to verify seeded metrics, channel breakdowns, target booleans, event rollups, unsupported event validation, and secret-safe provider responses.
   - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service`.
 
-- [ ] Add authenticated Flask routes for the prototype:
+- [x] Add authenticated Flask routes for the prototype:
   - `GET /simulations` renders the Simulation Center dashboard
   - `GET /api/simulations/metrics` returns campaign and channel metrics as JSON
   - `POST /api/simulations/events` records lab/demo events for delivery, open, forward, delete, link click, and attachment open
   - `GET /ai-settings` renders a GUI for model/provider configuration
   - `POST /api/ai-settings` saves provider configuration without exposing secrets in rendered pages or JSON responses
+
+  Completion notes:
+  - Added authenticated `/simulations`, `/api/simulations/metrics`, `/api/simulations/events`, `/ai-settings`, and `/api/ai-settings` routes in `SocialFish.py`.
+  - Reused `core.simulation_service` for metrics, event recording, and provider updates; API responses return service-shaped data and do not echo secrets.
+  - Added starter admin templates `templates/admin/simulations.html` and `templates/admin/ai_settings.html` so the new GET routes render during this phase; the next task can expand them into the full integrated UI.
+  - Added `tests/test_simulation_routes.py` covering authenticated page rendering, seeded channel metrics JSON, event recording, and AI provider secret redaction.
+  - Installed dependencies from `requirements.txt` because `Flask` was missing in the active Python environment.
+  - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service tests.test_simulation_routes`.
 
 - [ ] Create integrated admin UI templates for the prototype:
   - Add `templates/admin/simulations.html` with campaign summary cards, channel breakdowns for email/SMS/voice, and a target activity table

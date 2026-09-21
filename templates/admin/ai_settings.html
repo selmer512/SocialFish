@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="SocialFish">
+    <meta name="author" content="UndeadSec">
+    <meta name="keywords" content="SocialFish">
+    <title>SocialFish AI Settings</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/creds"><i class="fas fa-arrow-left"></i> <strong>SocialFish</strong></a>/AI Settings
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    Configure model providers for authorized internal training simulations. Secrets are accepted by the API but are never rendered back.
+                </div>
+                {% for provider in providers %}
+                <form action="/api/ai-settings" method="POST" class="form-horizontal">
+                    <input type="hidden" name="provider_id" value="{{ provider.id }}">
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Provider</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="text" name="name" value="{{ provider.name }}" class="form-control">
+                            <small class="form-text text-muted">{{ provider.provider_type }} provider</small>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Model</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="text" name="model_name" value="{{ provider.model_name }}" class="form-control">
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Base URL</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="text" name="base_url" value="{{ provider.base_url }}" class="form-control">
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Secret</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="password" name="secret" placeholder="{{ 'Configured' if provider.secret_configured else 'Not configured' }}" class="form-control">
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Enabled</label></div>
+                        <div class="col-12 col-md-9">
+                            <label class="switch switch-text switch-info switch-pill">
+                                <input type="checkbox" name="enabled" class="switch-input" {% if provider.enabled %}checked{% endif %}>
+                                <span data-on="On" data-off="Off" class="switch-label"></span>
+                                <span class="switch-handle"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="card-footer" style="text-align: right;">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="fa fa-dot-circle-o"></i> Save
+                        </button>
+                    </div>
+                </form>
+                <hr>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>

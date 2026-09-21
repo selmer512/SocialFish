@@ -14,6 +14,14 @@ from core.cleanFake import cleanFake
 from core.genReport import genReport
 from core.report import generate_unique
 from core.db_migration import migrate_db
+from core.simulation_service import (
+    get_campaign_metrics,
+    list_ai_provider_settings,
+    list_campaigns,
+    list_targets,
+    record_simulation_event,
+    update_ai_provider_settings,
+)
 from core.tunnel_manager import TunnelManager
 from core.recorder_playwright import PlaywrightRecorder
 from core.cookie_inspector import CookieInspector
@@ -95,6 +103,24 @@ def sf_get(cur, column, default=None):
         return row[0] if row and row[0] is not None else default
     except Exception:
         return default
+
+
+def _request_data():
+    return request.get_json(silent=True) or request.form.to_dict()
+
+
+def _optional_int(value):
+    if value in (None, ""):
+        return None
+    return int(value)
+
+
+def _form_bool(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in ("1", "true", "yes", "on")
 
 # Conta o numero de credenciais salvas no banco
 def countCreds():
@@ -307,6 +333,78 @@ def getCreds():
     tokenapi = sf_get(cur, 'token', '')
     data = cur.execute("SELECT id, url, pdate, browser, bversion, platform, rip FROM creds order by id desc").fetchall()
     return render_template('admin/index.html', data=data, clicks=clicks, countCreds=countCreds, countNotPickedUp=countNotPickedUp, attacks=attacks, tokenapi=tokenapi)
+
+
+@app.route("/simulations", methods=['GET'])
+@flask_login.login_required
+def simulations_dashboard():
+    campaigns = list_campaigns(g.db)
+    campaign_id = campaigns[0]["id"] if campaigns else None
+    metrics = get_campaign_metrics(g.db, campaign_id)
+    targets = list_targets(g.db, campaign_id)
+    return render_template(
+        'admin/simulations.html',
+        campaigns=campaigns,
+        metrics=metrics,
+        targets=targets,
+    )
+
+
+@app.route("/api/simulations/metrics", methods=['GET'])
+@flask_login.login_required
+def simulation_metrics_api():
+    campaign_id = _optional_int(request.args.get("campaign_id"))
+    return jsonify({
+        'status': 'ok',
+        'metrics': get_campaign_metrics(g.db, campaign_id),
+    })
+
+
+@app.route("/api/simulations/events", methods=['POST'])
+@flask_login.login_required
+def simulation_events_api():
+    data = _request_data()
+    try:
+        event = record_simulation_event(
+            g.db,
+            _optional_int(data.get('campaign_id')),
+            data.get('event_type'),
+            target_id=_optional_int(data.get('target_id')),
+            channel=data.get('channel'),
+            delivery_status=data.get('delivery_status'),
+            metadata=data.get('metadata') if isinstance(data.get('metadata'), dict) else None,
+        )
+        return jsonify({'status': 'ok', 'event': event})
+    except (TypeError, ValueError) as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+
+@app.route("/ai-settings", methods=['GET'])
+@flask_login.login_required
+def ai_settings():
+    providers = list_ai_provider_settings(g.db)
+    return render_template('admin/ai_settings.html', providers=providers)
+
+
+@app.route("/api/ai-settings", methods=['POST'])
+@flask_login.login_required
+def ai_settings_api():
+    data = _request_data()
+    try:
+        provider = update_ai_provider_settings(
+            g.db,
+            _optional_int(data.get('provider_id') or data.get('id')),
+            name=data.get('name'),
+            provider_type=data.get('provider_type'),
+            model_name=data.get('model_name'),
+            base_url=data.get('base_url'),
+            enabled=_form_bool(data.get('enabled')),
+            secret=data.get('secret') or data.get('api_key'),
+            description=data.get('description'),
+        )
+        return jsonify({'status': 'ok', 'provider': provider})
+    except (TypeError, ValueError) as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
 
 # pagina para envio de emails
 @app.route("/mail", methods=['GET', 'POST'])

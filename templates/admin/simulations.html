@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="SocialFish">
+    <meta name="author" content="UndeadSec">
+    <meta name="keywords" content="SocialFish">
+    <title>SocialFish Simulation Center</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/creds"><i class="fas fa-arrow-left"></i> <strong>SocialFish</strong></a>/Simulation Center
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    Authorized internal training simulations only. No external delivery is configured in this Phase 01 prototype.
+                </div>
+                <h4 class="mb-3">Campaigns</h4>
+                {% for campaign in campaigns %}
+                <p>
+                    <strong>{{ campaign.name }}</strong>
+                    <br>
+                    <small>{{ campaign.authorized_scope }}</small>
+                </p>
+                {% endfor %}
+                <h4 class="mb-3">Aggregate Metrics</h4>
+                <div class="row">
+                    <div class="col-md-2"><strong>{{ metrics.aggregate.total_targets }}</strong><br><small>Targets</small></div>
+                    <div class="col-md-2"><strong>{{ metrics.aggregate.delivered }}</strong><br><small>Delivered</small></div>
+                    <div class="col-md-2"><strong>{{ metrics.aggregate.opened }}</strong><br><small>Opened</small></div>
+                    <div class="col-md-2"><strong>{{ metrics.aggregate.link_clicked }}</strong><br><small>Clicked</small></div>
+                    <div class="col-md-2"><strong>{{ metrics.aggregate.attachment_opened }}</strong><br><small>Attachments</small></div>
+                </div>
+                <hr>
+                <h4 class="mb-3">Target Activity</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Channel</th>
+                                <th>Status</th>
+                                <th>Opened</th>
+                                <th>Clicked</th>
+                                <th>Attachment</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for target in targets %}
+                            <tr class="tr-shadow">
+                                <td>{{ target.name }}</td>
+                                <td>{{ target.channel }}</td>
+                                <td>{{ target.delivery_status }}</td>
+                                <td>{{ "yes" if target.opened else "no" }}</td>
+                                <td>{{ "yes" if target.link_clicked else "no" }}</td>
+                                <td>{{ "yes" if target.attachment_opened else "no" }}</td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>
