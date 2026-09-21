@@ -87,9 +87,17 @@ This phase creates a self-contained working prototype for a UI-first Cybersecuri
   - The smoke test updates a cloud AI provider with a test secret and verifies the API response reports only `secret_configured` without returning the secret or internal placeholder field.
   - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service tests.test_simulation_routes tests.test_simulation_smoke`.
 
-- [ ] Verify the Phase 01 prototype end to end:
+- [x] Verify the Phase 01 prototype end to end:
   - Install any missing dependencies listed in `requirements.txt` only if needed for the existing app to import
   - Run the database migration or app startup path
   - Run the smoke tests or script added in this phase
   - Start the Flask app locally with test credentials and confirm the new authenticated routes return HTTP 200 using automated requests
   - Record any command needed to launch the prototype in existing project documentation while keeping configuration UI-first
+
+  Completion notes:
+  - Verified the existing dependency set was sufficient for imports; no new dependency installation was required during this task.
+  - Ran `python -m unittest tests.test_console_output tests.test_simulation_migration tests.test_simulation_service tests.test_simulation_routes tests.test_simulation_smoke` and confirmed 13 tests pass.
+  - Started the app with `python SocialFish.py phase01-user phase01-pass`; the normal startup path ran `initDB(DATABASE)` and `migrate_db(DATABASE)` against `./database.db`.
+  - Confirmed authenticated local HTTP checks with automated `curl.exe` requests: login through `/neptune` returned 302, `/simulations` returned 200, `/ai-settings` returned 200, and `/api/simulations/metrics` returned 200 with seeded `email`, `sms`, and `voice` channel data.
+  - Fixed `core/view.py` so redirected Windows console output no longer crashes on the Unicode startup banner before Flask binds.
+  - Documented the prototype launch command and UI-first `/simulations` and `/ai-settings` entry points in `README.md`.

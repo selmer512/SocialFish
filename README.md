@@ -48,6 +48,16 @@ python SocialFish.py admin password
 
 Then access: **http://localhost:5000/neptune**
 
+### Simulation Center Prototype
+
+The Phase 01 Simulation Center prototype runs from the normal Flask startup path:
+
+```bash
+python SocialFish.py admin password
+```
+
+After logging in at **http://localhost:5000/neptune**, open **/simulations** for authorized internal training metrics and **/ai-settings** for UI-managed local/cloud provider configuration. The startup path initializes the database and applies the simulation migrations automatically; no external AI credentials are required for the prototype.
+
 ## 🎯 Basic Workflow
 
 1. **Create Template**

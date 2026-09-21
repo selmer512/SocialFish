@@ -1,8 +1,19 @@
+import sys
+
 import colorama
 
+
+def _console_print(value=""):
+    try:
+        print(value)
+    except UnicodeEncodeError:
+        encoding = sys.stdout.encoding or "utf-8"
+        safe_value = str(value).encode(encoding, errors="replace").decode(encoding)
+        sys.stdout.write(safe_value + "\n")
+
 def head():
-    print(colorama.Style.BRIGHT)
-    print(colorama.Fore.CYAN + '''
+    _console_print(colorama.Style.BRIGHT)
+    _console_print(colorama.Fore.CYAN + '''
                           '
                         '   '  UNDEADSEC | t.me/UndeadSec 
                       '       '  youtube.com/c/UndeadSec - BRAZIL
@@ -20,4 +31,4 @@ def head():
                      '       '      '       Site: https://www.undeadsec.com
                        ' .  '
                            ''')
-    print(colorama.Fore.GREEN + 'Go to http://0.0.0.0:5000/neptune to start')
+    _console_print(colorama.Fore.GREEN + 'Go to http://0.0.0.0:5000/neptune to start')
