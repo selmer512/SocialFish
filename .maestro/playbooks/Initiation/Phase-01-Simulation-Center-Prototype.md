@@ -77,9 +77,15 @@ This phase creates a self-contained working prototype for a UI-first Cybersecuri
   - Added route smoke coverage that verifies `/creds` exposes both new navigation links after authentication.
   - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service tests.test_simulation_routes`.
 
-- [ ] Add automated smoke coverage for the new prototype:
+- [x] Add automated smoke coverage for the new prototype:
   - Create focused tests or a lightweight smoke script that initializes the database, authenticates with a test client or controlled app context, verifies `/simulations` and `/ai-settings` render successfully, and verifies the metrics JSON contains seeded email/SMS/voice campaign data
   - Include a check that saved AI provider configuration does not echo secrets back in API responses
+
+  Completion notes:
+  - Added `tests/test_simulation_smoke.py` as a focused authenticated smoke test for the Phase 01 prototype.
+  - The smoke test creates a temporary database with `migrate_db`, logs in through `/neptune`, verifies `/simulations` and `/ai-settings` return HTTP 200, and checks metrics JSON includes seeded email, SMS, and voice targets.
+  - The smoke test updates a cloud AI provider with a test secret and verifies the API response reports only `secret_configured` without returning the secret or internal placeholder field.
+  - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service tests.test_simulation_routes tests.test_simulation_smoke`.
 
 - [ ] Verify the Phase 01 prototype end to end:
   - Install any missing dependencies listed in `requirements.txt` only if needed for the existing app to import
