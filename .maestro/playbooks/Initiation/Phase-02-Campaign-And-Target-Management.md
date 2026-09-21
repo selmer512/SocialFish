@@ -13,11 +13,17 @@ This phase turns the prototype into a usable campaign management workflow for th
   - Match `templates/admin/simulations.html` and `templates/admin/ai_settings.html`: Bootstrap 4 admin cards, Font Awesome icons, safety language for authorized internal training, table-responsive layouts, and UI-first controls.
   - Add tests in the existing `unittest` style using temporary SQLite databases, `migrate_db`, mocked `sys.argv` before importing `SocialFish`, Flask `test_client`, and assertions for rendered UI, JSON payloads, idempotency, and secret-safe responses.
 
-- [ ] Extend the simulation schema for practical campaign management:
+- [x] Extend the simulation schema for practical campaign management:
   - Add campaign fields for name, description, objective, training owner, status, start/end dates, selected channels, landing/training URL, and audit timestamps
   - Add target fields for display name, email, phone number, department, manager, source, active state, and import batch ID
   - Add import batch tracking for uploaded CSV files, validation errors, row counts, and timestamps
   - Keep all schema changes idempotent and compatible with an existing `database.db`
+
+  Notes for follow-on tasks:
+  - `core/db_migration.py` now expands `simulation_campaigns` with `objective`, `training_owner`, `selected_channels`, `landing_url`, `training_url`, `start_date`, `end_date`, and `archived_at` while preserving the Phase 01 `channel`, `started_at`, and `completed_at` fields for compatibility.
+  - `simulation_targets` now supports `display_name`, `manager`, `source`, `active`, `import_batch_id`, and `archived_at`, with existing delivery metric columns left intact.
+  - `simulation_import_batches` tracks CSV upload metadata, row counts, validation errors, status, and audit timestamps.
+  - `tests/test_simulation_migration.py` covers idempotent migration from both a blank database and an existing Phase 01 schema.
 
 - [ ] Implement campaign and target services:
   - Add create, update, archive, list, and detail functions for campaigns
