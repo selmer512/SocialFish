@@ -1,4 +1,5 @@
 import importlib
+import io
 import sqlite3
 import sys
 import tempfile
@@ -260,6 +261,140 @@ class SimulationRoutesTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn(b"Campaign name is required.", response.data)
+
+    def test_target_management_routes_create_update_and_archive(self):
+        campaign_id = self._campaign_id()
+
+        create_response = self.client.post(
+            "/simulations/campaigns/{}/targets".format(campaign_id),
+            data={
+                "name": "Route Target",
+                "display_name": "Route Target Display",
+                "email": "ROUTE.TARGET@EXAMPLE.TEST",
+                "department": "Security",
+                "manager": "Route Manager",
+                "channel": "email",
+                "active": "on",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(create_response.status_code, 200)
+        self.assertIn(b"Target Route Target Display added to the campaign.", create_response.data)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            target = conn.execute(
+                """
+                SELECT id, email, display_name, department, manager, active
+                FROM simulation_targets
+                WHERE name = 'Route Target'
+                """
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertIsNotNone(target)
+        target_id = target[0]
+        self.assertEqual(target[1], "route.target@example.test")
+        self.assertEqual(target[2], "Route Target Display")
+        self.assertEqual(target[5], 1)
+
+        update_response = self.client.post(
+            "/simulations/targets/{}".format(target_id),
+            data={
+                "name": "Route Target Updated",
+                "display_name": "Route Target Updated",
+                "email": "route.updated@example.test",
+                "phone": "",
+                "department": "Awareness",
+                "manager": "Updated Manager",
+                "source": "manual",
+                "channel": "email",
+                "active": "true",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(update_response.status_code, 200)
+        self.assertIn(b"Target Route Target Updated updated.", update_response.data)
+
+        archive_response = self.client.post(
+            "/simulations/targets/{}/archive".format(target_id),
+            follow_redirects=True,
+        )
+        self.assertEqual(archive_response.status_code, 200)
+        self.assertIn(b"Target archived. Historical events were preserved.", archive_response.data)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            archived = conn.execute(
+                "SELECT name, active, archived_at FROM simulation_targets WHERE id = ?",
+                (target_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(archived[0], "Route Target Updated")
+        self.assertEqual(archived[1], 0)
+        self.assertIsNotNone(archived[2])
+
+    def test_target_create_route_displays_validation_errors(self):
+        response = self.client.post(
+            "/simulations/campaigns/{}/targets".format(self._campaign_id()),
+            data={"name": "No Email", "channel": "email"},
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Target requires at least one contact method", response.data)
+
+    def test_target_csv_upload_records_batch_and_flashes_row_errors(self):
+        campaign_id = self._campaign_id()
+        csv_content = (
+            "name,email,phone,channel,department\n"
+            "CSV Route One,csv.one@example.test,,email,Security\n"
+            "CSV Route Bad,,555-1212,email,Awareness\n"
+            "CSV Route Two,,+15551234567,sms,Operations\n"
+        )
+
+        response = self.client.post(
+            "/simulations/campaigns/{}/targets/upload".format(campaign_id),
+            data={
+                "targets_csv": (
+                    io.BytesIO(csv_content.encode("utf-8")),
+                    "route-targets.csv",
+                ),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Imported 2 target(s) with 1 validation error(s).", response.data)
+        self.assertIn(b"CSV row 3: Email channel targets require an email address.", response.data)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            batch = conn.execute(
+                """
+                SELECT original_filename, total_rows, valid_rows, invalid_rows, imported_rows
+                FROM simulation_import_batches
+                WHERE campaign_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (campaign_id,),
+            ).fetchone()
+            imported = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM simulation_targets
+                WHERE campaign_id = ? AND source = 'csv'
+                """,
+                (campaign_id,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(batch, ("route-targets.csv", 3, 2, 1, 2))
+        self.assertEqual(imported, 2)
 
 
 if __name__ == "__main__":

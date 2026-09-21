@@ -52,12 +52,17 @@ This phase turns the prototype into a usable campaign management workflow for th
   - Minimal route-ready templates were added at `templates/admin/simulation_campaigns.html`, `templates/admin/simulation_campaign_form.html`, and `templates/admin/simulation_campaign_detail.html`; the later UI task can expand these surfaces.
   - `tests/test_simulation_routes.py` covers authenticated campaign page rendering, campaign create/update/detail/archive, validation errors, and preserved archived campaign state.
 
-- [ ] Add authenticated target management routes:
+- [x] Add authenticated target management routes:
   - `POST /simulations/campaigns/<id>/targets` adds a single target from the UI
   - `POST /simulations/campaigns/<id>/targets/upload` imports a CSV from the UI and records an import batch
   - `POST /simulations/targets/<id>` updates a target
   - `POST /simulations/targets/<id>/archive` archives a target while preserving events
   - Return clear success/error responses that the existing Flask flash pattern can display
+
+  Notes for follow-on tasks:
+  - `SocialFish.py` now exposes authenticated GUI routes for manual target create, CSV upload, target update, and target archive using the existing `flash` plus redirect pattern.
+  - CSV uploads accept `targets_csv` or `csv_file`, call `import_targets_csv`, record import batches, and flash the first row-numbered validation errors for display on the campaign detail page.
+  - Manual target validation remains centralized in `core/simulation_service.py`; route tests cover success, validation failures, archive preservation, and import batch accounting.
 
 - [ ] Build campaign and target UI templates:
   - Create list, create, and detail templates under `templates/admin/` using the existing Bootstrap style

@@ -16,15 +16,19 @@ from core.report import generate_unique
 from core.db_migration import migrate_db
 from core.simulation_service import (
     archive_campaign,
+    archive_target,
     create_campaign,
+    create_target,
     get_campaign_metrics,
     get_campaign_detail,
+    import_targets_csv,
     list_ai_provider_settings,
     list_campaigns,
     list_targets,
     record_simulation_event,
     update_campaign,
     update_ai_provider_settings,
+    update_target,
 )
 from core.tunnel_manager import TunnelManager
 from core.recorder_playwright import PlaywrightRecorder
@@ -149,6 +153,23 @@ def _campaign_payload():
         "end_date": data.get("end_date"),
         "authorized_scope": data.get("authorized_scope"),
     }
+
+
+def _target_payload(include_active=True):
+    data = _request_data()
+    payload = {
+        "name": data.get("name"),
+        "display_name": data.get("display_name"),
+        "email": data.get("email"),
+        "phone": data.get("phone"),
+        "department": data.get("department"),
+        "manager": data.get("manager"),
+        "source": data.get("source") or "manual",
+        "channel": data.get("channel"),
+    }
+    if include_active and "active" in data:
+        payload["active"] = _form_bool(data.get("active"))
+    return payload
 
 # Conta o numero de credenciais salvas no banco
 def countCreds():
@@ -459,6 +480,71 @@ def archive_simulation_campaign(campaign_id):
     except ValueError as e:
         flash(str(e), "danger")
     return redirect("/simulations/campaigns")
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>/targets", methods=['POST'])
+@flask_login.login_required
+def create_simulation_target(campaign_id):
+    try:
+        target = create_target(g.db, campaign_id, **_target_payload())
+        flash("Target {} added to the campaign.".format(target["display_name"] or target["name"]), "success")
+    except (TypeError, ValueError) as e:
+        flash(str(e), "danger")
+    return redirect("/simulations/campaigns/{}".format(campaign_id))
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>/targets/upload", methods=['POST'])
+@flask_login.login_required
+def upload_simulation_targets(campaign_id):
+    upload = request.files.get("targets_csv") or request.files.get("csv_file")
+    if not upload or not upload.filename:
+        flash("Choose a CSV file before importing targets.", "danger")
+        return redirect("/simulations/campaigns/{}".format(campaign_id))
+
+    try:
+        result = import_targets_csv(
+            g.db,
+            campaign_id,
+            upload.read(),
+            original_filename=upload.filename,
+        )
+        imported_count = len(result["targets"])
+        if result["errors"]:
+            flash(
+                "Imported {} target(s) with {} validation error(s).".format(imported_count, len(result["errors"])),
+                "warning",
+            )
+            for error in result["errors"][:5]:
+                flash("CSV row {}: {}".format(error["row"], error["message"]), "danger")
+        else:
+            flash("Imported {} target(s) from CSV.".format(imported_count), "success")
+    except (TypeError, ValueError, UnicodeDecodeError) as e:
+        flash(str(e), "danger")
+    return redirect("/simulations/campaigns/{}".format(campaign_id))
+
+
+@app.route("/simulations/targets/<int:target_id>", methods=['POST'])
+@flask_login.login_required
+def update_simulation_target(target_id):
+    try:
+        target = update_target(g.db, target_id, **_target_payload())
+        flash("Target {} updated.".format(target["display_name"] or target["name"]), "success")
+        return redirect("/simulations/campaigns/{}".format(target["campaign_id"]))
+    except (TypeError, ValueError) as e:
+        flash(str(e), "danger")
+        return redirect("/simulations/campaigns")
+
+
+@app.route("/simulations/targets/<int:target_id>/archive", methods=['POST'])
+@flask_login.login_required
+def archive_simulation_target(target_id):
+    try:
+        target = archive_target(g.db, target_id)
+        flash("Target archived. Historical events were preserved.", "success")
+        return redirect("/simulations/campaigns/{}".format(target["campaign_id"]))
+    except ValueError as e:
+        flash(str(e), "danger")
+        return redirect("/simulations/campaigns")
 
 
 @app.route("/api/simulations/metrics", methods=['GET'])
