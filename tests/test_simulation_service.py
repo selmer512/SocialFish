@@ -5,12 +5,21 @@ from pathlib import Path
 
 from core.db_migration import SIMULATION_DEMO_SLUG, migrate_db
 from core.simulation_service import (
+    archive_campaign,
+    archive_target,
+    create_campaign,
+    create_target,
+    get_campaign_detail,
     get_campaign_metrics,
+    import_targets_csv,
     list_ai_provider_settings,
     list_campaigns,
     list_targets,
+    parse_target_csv,
     record_simulation_event,
+    update_campaign,
     update_ai_provider_settings,
+    update_target,
 )
 
 
@@ -49,6 +58,143 @@ class SimulationServiceTest(unittest.TestCase):
         self.assertEqual(len(targets), 4)
         self.assertIs(targets[0]["opened"], True)
         self.assertIs(targets[0]["forwarded"], False)
+
+    def test_creates_updates_archives_and_details_campaigns(self):
+        campaign = create_campaign(
+            self.conn,
+            "Finance Awareness",
+            description="Internal finance training",
+            objective="Reduce unsafe link clicks",
+            training_owner="Security Team",
+            selected_channels=["email", "sms"],
+            landing_url="https://training.example.test/landing",
+        )
+
+        self.assertEqual(campaign["name"], "Finance Awareness")
+        self.assertEqual(campaign["channel"], "email")
+        self.assertEqual(campaign["selected_channels"], ["email", "sms"])
+        self.assertFalse(campaign["archived"])
+
+        updated = update_campaign(
+            self.conn,
+            campaign["id"],
+            name="Finance Awareness FY26",
+            status="active",
+            selected_channels=["voice", "email"],
+            training_url="https://training.example.test/course",
+        )
+        self.assertEqual(updated["slug"], "finance-awareness-fy26")
+        self.assertEqual(updated["status"], "active")
+        self.assertEqual(updated["channel"], "voice")
+        self.assertEqual(updated["selected_channels"], ["voice", "email"])
+
+        detail = get_campaign_detail(self.conn, campaign["id"])
+        self.assertEqual(detail["campaign"]["id"], campaign["id"])
+        self.assertEqual(detail["metrics"]["aggregate"]["total_targets"], 0)
+        self.assertEqual(detail["targets"], [])
+
+        archived = archive_campaign(self.conn, campaign["id"])
+        self.assertTrue(archived["archived"])
+        self.assertEqual(archived["status"], "archived")
+        self.assertNotIn(campaign["id"], [row["id"] for row in list_campaigns(self.conn)])
+        self.assertIn(campaign["id"], [row["id"] for row in list_campaigns(self.conn, include_archived=True)])
+
+    def test_manual_targets_validate_update_and_archive(self):
+        campaign = create_campaign(self.conn, "Target Service Test", selected_channels=["sms"])
+        target = create_target(
+            self.conn,
+            campaign["id"],
+            name="Taylor Gray",
+            phone="(555) 010-2222",
+            department="Finance",
+            manager="Avery Stone",
+        )
+
+        self.assertEqual(target["phone"], "5550102222")
+        self.assertEqual(target["channel"], "sms")
+        self.assertTrue(target["active"])
+
+        updated = update_target(
+            self.conn,
+            target["id"],
+            channel="email",
+            email="Taylor.Gray@Example.Test",
+            phone="+1 555 010 2222",
+            display_name="Taylor G.",
+        )
+        self.assertEqual(updated["email"], "taylor.gray@example.test")
+        self.assertEqual(updated["phone"], "+15550102222")
+        self.assertEqual(updated["display_name"], "Taylor G.")
+
+        with self.assertRaisesRegex(ValueError, "valid address"):
+            create_target(
+                self.conn,
+                campaign["id"],
+                name="Invalid Email",
+                email="not-an-email",
+                channel="email",
+            )
+
+        archived = archive_target(self.conn, target["id"])
+        self.assertFalse(archived["active"])
+        self.assertTrue(archived["archived"])
+        self.assertEqual(list_targets(self.conn, campaign["id"]), [])
+        self.assertEqual(len(list_targets(self.conn, campaign["id"], include_archived=True)), 1)
+
+    def test_parses_target_csv_with_displayable_validation_errors(self):
+        parsed = parse_target_csv(
+            """name,email,phone,channel,department
+Valid Email,valid@example.test,,email,Finance
+Missing Phone,,555,voice,Support
+Bad Email,not-an-email,,email,Engineering
+Duplicate Email,valid@example.test,,email,Finance
+"""
+        )
+
+        self.assertEqual(len(parsed["rows"]), 1)
+        self.assertEqual(parsed["rows"][0]["email"], "valid@example.test")
+        messages = [error["message"] for error in parsed["errors"]]
+        self.assertTrue(any("7 to 15 digits" in message for message in messages))
+        self.assertTrue(any("valid address" in message for message in messages))
+        self.assertTrue(any("Duplicate target contact" in message for message in messages))
+        self.assertEqual({error["row"] for error in parsed["errors"]}, {3, 4, 5})
+
+    def test_imports_target_csv_and_records_batch_errors(self):
+        campaign = create_campaign(self.conn, "CSV Import Test", selected_channels=["email", "sms"])
+        create_target(
+            self.conn,
+            campaign["id"],
+            name="Existing Target",
+            email="existing@example.test",
+            channel="email",
+        )
+
+        result = import_targets_csv(
+            self.conn,
+            campaign["id"],
+            """name,email,phone,channel,department,manager
+Imported Email,imported@example.test,,email,Finance,Avery
+Imported SMS,,+1 (555) 010-3333,sms,Operations,Jordan
+Existing Target,existing@example.test,,email,Finance,Avery
+Broken Voice,,,voice,Support,Morgan
+""",
+            original_filename="targets.csv",
+        )
+
+        self.assertEqual(result["batch"]["status"], "completed_with_errors")
+        self.assertEqual(result["batch"]["total_rows"], 4)
+        self.assertEqual(result["batch"]["valid_rows"], 2)
+        self.assertEqual(result["batch"]["invalid_rows"], 2)
+        self.assertEqual(result["batch"]["imported_rows"], 2)
+        self.assertEqual(len(result["targets"]), 2)
+        self.assertTrue(any("already exists" in error["message"] for error in result["errors"]))
+        self.assertTrue(any("phone number" in error["message"].lower() for error in result["errors"]))
+        targets = list_targets(self.conn, campaign["id"])
+        self.assertEqual(len(targets), 3)
+        self.assertEqual(
+            len([target for target in targets if target["source"] == "csv"]),
+            2,
+        )
 
     def test_records_event_and_updates_target_rollup(self):
         voice_target_id = self.conn.execute(

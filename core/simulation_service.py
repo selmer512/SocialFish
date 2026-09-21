@@ -1,5 +1,22 @@
+import csv
 from datetime import UTC, datetime
+from io import StringIO
 import json
+import re
+
+
+VALID_SIMULATION_CHANNELS = {"email", "sms", "voice"}
+VALID_CAMPAIGN_STATUSES = {"draft", "active", "paused", "completed", "archived"}
+TARGET_CSV_COLUMNS = {
+    "name",
+    "display_name",
+    "email",
+    "phone",
+    "department",
+    "manager",
+    "channel",
+    "active",
+}
 
 
 VALID_SIMULATION_EVENTS = {
@@ -72,6 +89,144 @@ def _bool(value):
     return bool(int(value or 0))
 
 
+def _json_list(value):
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    if isinstance(parsed, list):
+        return parsed
+    return []
+
+
+def _normalize_text(value):
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _normalize_status(status):
+    normalized = (_normalize_text(status) or "draft").lower()
+    if normalized not in VALID_CAMPAIGN_STATUSES:
+        raise ValueError("Campaign status must be one of: {}".format(", ".join(sorted(VALID_CAMPAIGN_STATUSES))))
+    return normalized
+
+
+def _normalize_channels(channels=None, channel=None):
+    values = []
+    if isinstance(channels, str):
+        try:
+            parsed = json.loads(channels)
+            values = parsed if isinstance(parsed, list) else [channels]
+        except ValueError:
+            values = channels.split(",")
+    elif channels:
+        values = list(channels)
+    elif channel:
+        values = [channel]
+    else:
+        values = ["email"]
+
+    normalized = []
+    for value in values:
+        channel_value = (_normalize_text(value) or "").lower()
+        if not channel_value:
+            continue
+        if channel_value not in VALID_SIMULATION_CHANNELS:
+            raise ValueError("Channel must be one of: {}".format(", ".join(sorted(VALID_SIMULATION_CHANNELS))))
+        if channel_value not in normalized:
+            normalized.append(channel_value)
+
+    if not normalized:
+        raise ValueError("At least one campaign channel is required.")
+    return normalized
+
+
+def _normalize_email(email):
+    normalized = (_normalize_text(email) or "").lower()
+    if not normalized:
+        return None
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", normalized):
+        raise ValueError("Email address must be a valid address such as user@example.com.")
+    return normalized
+
+
+def _normalize_phone(phone):
+    normalized = _normalize_text(phone)
+    if not normalized:
+        return None
+    compact = re.sub(r"[\s().-]+", "", normalized)
+    if not re.match(r"^\+?\d+$", compact):
+        raise ValueError("Phone number may only contain digits, spaces, punctuation, and an optional leading +.")
+    digits = re.sub(r"\D", "", compact)
+    if len(digits) < 7 or len(digits) > 15:
+        raise ValueError("Phone number must contain 7 to 15 digits.")
+    return compact
+
+
+def _normalize_active(active):
+    if isinstance(active, str):
+        return 0 if active.strip().lower() in {"0", "false", "no", "off", "inactive"} else 1
+    return 1 if active is None or bool(active) else 0
+
+
+def _normalize_target_payload(payload, default_channel="email", source="manual"):
+    payload = payload or {}
+    name = _normalize_text(payload.get("name")) or _normalize_text(payload.get("display_name"))
+    display_name = _normalize_text(payload.get("display_name")) or name
+    email = _normalize_email(payload.get("email"))
+    phone = _normalize_phone(payload.get("phone"))
+    channel = (_normalize_text(payload.get("channel")) or default_channel or "email").lower()
+
+    if channel not in VALID_SIMULATION_CHANNELS:
+        raise ValueError("Target channel must be one of: {}".format(", ".join(sorted(VALID_SIMULATION_CHANNELS))))
+    if not name:
+        raise ValueError("Target name is required.")
+    if not email and not phone:
+        raise ValueError("Target requires at least one contact method: email or phone number.")
+    if channel == "email" and not email:
+        raise ValueError("Email channel targets require an email address.")
+    if channel in {"sms", "voice"} and not phone:
+        raise ValueError("{} channel targets require a phone number.".format(channel.upper()))
+
+    return {
+        "name": name,
+        "display_name": display_name,
+        "email": email,
+        "phone": phone,
+        "department": _normalize_text(payload.get("department")),
+        "manager": _normalize_text(payload.get("manager")),
+        "source": _normalize_text(payload.get("source")) or source,
+        "active": _normalize_active(payload.get("active")),
+        "channel": channel,
+    }
+
+
+def _slugify(value):
+    slug = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+    return slug or "simulation-campaign"
+
+
+def _unique_campaign_slug(conn, name, campaign_id=None):
+    base_slug = _slugify(name)
+    slug = base_slug
+    suffix = 2
+    while True:
+        params = [slug]
+        query = "SELECT id FROM simulation_campaigns WHERE slug = ?"
+        if campaign_id is not None:
+            query += " AND id != ?"
+            params.append(campaign_id)
+        existing = _row_to_dict(conn.execute(query, params))
+        if not existing:
+            return slug
+        slug = "{}-{}".format(base_slug, suffix)
+        suffix += 1
+
+
 def _provider_response(row):
     provider = dict(row)
     provider["enabled"] = _bool(provider.get("enabled"))
@@ -80,39 +235,232 @@ def _provider_response(row):
     return provider
 
 
-def list_campaigns(conn):
+def _campaign_response(row):
+    if not row:
+        return None
+    campaign = dict(row)
+    campaign["selected_channels"] = _json_list(campaign.get("selected_channels"))
+    campaign["archived"] = campaign.get("archived_at") is not None
+    return campaign
+
+
+def _target_response(row):
+    if not row:
+        return None
+    target = dict(row)
+    for field in ("opened", "forwarded", "deleted", "link_clicked", "attachment_opened", "active"):
+        if field in target:
+            target[field] = _bool(target[field])
+    target["archived"] = target.get("archived_at") is not None
+    return target
+
+
+def list_campaigns(conn, include_archived=False):
     """Return simulation campaigns with target counts for dashboard summaries."""
+    where = "" if include_archived else "WHERE c.archived_at IS NULL"
     cursor = conn.execute(
-        """
+        f"""
         SELECT
             c.id,
             c.slug,
             c.name,
             c.description,
+            c.objective,
+            c.training_owner,
             c.channel,
+            c.selected_channels,
             c.status,
             c.authorized_scope,
+            c.landing_url,
+            c.training_url,
+            c.start_date,
+            c.end_date,
             c.started_at,
             c.completed_at,
+            c.archived_at,
             c.created_at,
             c.updated_at,
             COUNT(t.id) AS target_count
         FROM simulation_campaigns c
         LEFT JOIN simulation_targets t ON t.campaign_id = c.id
+        {where}
         GROUP BY c.id
         ORDER BY c.created_at DESC, c.id DESC
         """
     )
-    return _rows_to_dicts(cursor)
+    return [_campaign_response(row) for row in _rows_to_dicts(cursor)]
 
 
-def list_targets(conn, campaign_id=None):
+def get_campaign(conn, campaign_id):
+    campaign = _row_to_dict(
+        conn.execute(
+            """
+            SELECT
+                id, slug, name, description, objective, training_owner, channel,
+                selected_channels, status, authorized_scope, landing_url,
+                training_url, start_date, end_date, started_at, completed_at,
+                archived_at, created_at, updated_at
+            FROM simulation_campaigns
+            WHERE id = ?
+            """,
+            (campaign_id,),
+        )
+    )
+    return _campaign_response(campaign)
+
+
+def create_campaign(
+    conn,
+    name,
+    description=None,
+    objective=None,
+    training_owner=None,
+    status="draft",
+    selected_channels=None,
+    landing_url=None,
+    training_url=None,
+    start_date=None,
+    end_date=None,
+    authorized_scope=None,
+):
+    """Create a campaign record and return the normalized row."""
+    normalized_name = _normalize_text(name)
+    if not normalized_name:
+        raise ValueError("Campaign name is required.")
+
+    channels = _normalize_channels(selected_channels)
+    primary_channel = channels[0]
+    now = _utc_now()
+    cursor = conn.execute(
+        """
+        INSERT INTO simulation_campaigns (
+            slug, name, description, objective, training_owner, channel,
+            selected_channels, status, authorized_scope, landing_url,
+            training_url, start_date, end_date, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            _unique_campaign_slug(conn, normalized_name),
+            normalized_name,
+            _normalize_text(description),
+            _normalize_text(objective),
+            _normalize_text(training_owner),
+            primary_channel,
+            json.dumps(channels),
+            _normalize_status(status),
+            _normalize_text(authorized_scope),
+            _normalize_text(landing_url),
+            _normalize_text(training_url),
+            _normalize_text(start_date),
+            _normalize_text(end_date),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return get_campaign(conn, cursor.lastrowid)
+
+
+def update_campaign(conn, campaign_id, **fields):
+    """Update editable campaign metadata."""
+    existing = get_campaign(conn, campaign_id)
+    if not existing:
+        raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
+
+    channels = _normalize_channels(fields.get("selected_channels", existing["selected_channels"]))
+    name = _normalize_text(fields.get("name", existing["name"]))
+    if not name:
+        raise ValueError("Campaign name is required.")
+
+    updated = {
+        "slug": _unique_campaign_slug(conn, name, campaign_id=campaign_id),
+        "name": name,
+        "description": _normalize_text(fields.get("description", existing.get("description"))),
+        "objective": _normalize_text(fields.get("objective", existing.get("objective"))),
+        "training_owner": _normalize_text(fields.get("training_owner", existing.get("training_owner"))),
+        "channel": channels[0],
+        "selected_channels": json.dumps(channels),
+        "status": _normalize_status(fields.get("status", existing.get("status"))),
+        "authorized_scope": _normalize_text(fields.get("authorized_scope", existing.get("authorized_scope"))),
+        "landing_url": _normalize_text(fields.get("landing_url", existing.get("landing_url"))),
+        "training_url": _normalize_text(fields.get("training_url", existing.get("training_url"))),
+        "start_date": _normalize_text(fields.get("start_date", existing.get("start_date"))),
+        "end_date": _normalize_text(fields.get("end_date", existing.get("end_date"))),
+        "updated_at": _utc_now(),
+    }
+
+    conn.execute(
+        """
+        UPDATE simulation_campaigns
+        SET
+            slug = ?, name = ?, description = ?, objective = ?,
+            training_owner = ?, channel = ?, selected_channels = ?,
+            status = ?, authorized_scope = ?, landing_url = ?,
+            training_url = ?, start_date = ?, end_date = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            updated["slug"],
+            updated["name"],
+            updated["description"],
+            updated["objective"],
+            updated["training_owner"],
+            updated["channel"],
+            updated["selected_channels"],
+            updated["status"],
+            updated["authorized_scope"],
+            updated["landing_url"],
+            updated["training_url"],
+            updated["start_date"],
+            updated["end_date"],
+            updated["updated_at"],
+            campaign_id,
+        ),
+    )
+    conn.commit()
+    return get_campaign(conn, campaign_id)
+
+
+def archive_campaign(conn, campaign_id):
+    """Soft archive a campaign without deleting targets, events, or metrics."""
+    if not get_campaign(conn, campaign_id):
+        raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
+    now = _utc_now()
+    conn.execute(
+        """
+        UPDATE simulation_campaigns
+        SET status = 'archived', archived_at = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (now, now, campaign_id),
+    )
+    conn.commit()
+    return get_campaign(conn, campaign_id)
+
+
+def get_campaign_detail(conn, campaign_id, include_archived_targets=True):
+    campaign = get_campaign(conn, campaign_id)
+    if not campaign:
+        raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
+    return {
+        "campaign": campaign,
+        "targets": list_targets(conn, campaign_id, include_archived=include_archived_targets),
+        "metrics": get_campaign_metrics(conn, campaign_id),
+        "import_batches": list_import_batches(conn, campaign_id),
+    }
+
+
+def list_targets(conn, campaign_id=None, include_archived=False):
     """Return targets for one campaign or all campaigns."""
     params = []
-    where = ""
+    filters = []
     if campaign_id is not None:
-        where = "WHERE t.campaign_id = ?"
+        filters.append("t.campaign_id = ?")
         params.append(campaign_id)
+    if not include_archived:
+        filters.append("t.archived_at IS NULL")
+    where = "WHERE {}".format(" AND ".join(filters)) if filters else ""
 
     cursor = conn.execute(
         f"""
@@ -121,9 +469,14 @@ def list_targets(conn, campaign_id=None):
             t.campaign_id,
             c.name AS campaign_name,
             t.name,
+            t.display_name,
             t.email,
             t.phone,
             t.department,
+            t.manager,
+            t.source,
+            t.active,
+            t.import_batch_id,
             t.channel,
             t.delivery_status,
             t.opened,
@@ -137,6 +490,7 @@ def list_targets(conn, campaign_id=None):
             t.deleted_at,
             t.link_clicked_at,
             t.attachment_opened_at,
+            t.archived_at,
             t.created_at,
             t.updated_at
         FROM simulation_targets t
@@ -146,11 +500,291 @@ def list_targets(conn, campaign_id=None):
         """,
         params,
     )
-    rows = _rows_to_dicts(cursor)
+    return [_target_response(row) for row in _rows_to_dicts(cursor)]
+
+
+def get_target(conn, target_id):
+    target = _row_to_dict(
+        conn.execute(
+            """
+            SELECT
+                t.id, t.campaign_id, c.name AS campaign_name, t.name,
+                t.display_name, t.email, t.phone, t.department, t.manager,
+                t.source, t.active, t.import_batch_id, t.channel,
+                t.delivery_status, t.opened, t.forwarded, t.deleted,
+                t.link_clicked, t.attachment_opened, t.delivered_at,
+                t.opened_at, t.forwarded_at, t.deleted_at, t.link_clicked_at,
+                t.attachment_opened_at, t.archived_at, t.created_at, t.updated_at
+            FROM simulation_targets t
+            JOIN simulation_campaigns c ON c.id = t.campaign_id
+            WHERE t.id = ?
+            """,
+            (target_id,),
+        )
+    )
+    return _target_response(target)
+
+
+def create_target(conn, campaign_id, **fields):
+    campaign = get_campaign(conn, campaign_id)
+    if not campaign:
+        raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
+    payload = _normalize_target_payload(fields, default_channel=campaign["channel"], source=fields.get("source", "manual"))
+    now = _utc_now()
+    cursor = conn.execute(
+        """
+        INSERT INTO simulation_targets (
+            campaign_id, name, display_name, email, phone, department,
+            manager, source, active, import_batch_id, channel,
+            delivery_status, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        """,
+        (
+            campaign_id,
+            payload["name"],
+            payload["display_name"],
+            payload["email"],
+            payload["phone"],
+            payload["department"],
+            payload["manager"],
+            payload["source"],
+            payload["active"],
+            fields.get("import_batch_id"),
+            payload["channel"],
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return get_target(conn, cursor.lastrowid)
+
+
+def update_target(conn, target_id, **fields):
+    existing = get_target(conn, target_id)
+    if not existing:
+        raise ValueError("Unknown simulation target id: {}".format(target_id))
+
+    payload = {
+        "name": fields.get("name", existing["name"]),
+        "display_name": fields.get("display_name", existing["display_name"]),
+        "email": fields.get("email", existing["email"]),
+        "phone": fields.get("phone", existing["phone"]),
+        "department": fields.get("department", existing["department"]),
+        "manager": fields.get("manager", existing["manager"]),
+        "source": fields.get("source", existing["source"]),
+        "active": fields.get("active", existing["active"]),
+        "channel": fields.get("channel", existing["channel"]),
+    }
+    normalized = _normalize_target_payload(payload, default_channel=existing["channel"], source=existing["source"])
+    now = _utc_now()
+    conn.execute(
+        """
+        UPDATE simulation_targets
+        SET
+            name = ?, display_name = ?, email = ?, phone = ?,
+            department = ?, manager = ?, source = ?, active = ?,
+            channel = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            normalized["name"],
+            normalized["display_name"],
+            normalized["email"],
+            normalized["phone"],
+            normalized["department"],
+            normalized["manager"],
+            normalized["source"],
+            normalized["active"],
+            normalized["channel"],
+            now,
+            target_id,
+        ),
+    )
+    conn.commit()
+    return get_target(conn, target_id)
+
+
+def archive_target(conn, target_id):
+    if not get_target(conn, target_id):
+        raise ValueError("Unknown simulation target id: {}".format(target_id))
+    now = _utc_now()
+    conn.execute(
+        """
+        UPDATE simulation_targets
+        SET active = 0, archived_at = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (now, now, target_id),
+    )
+    conn.commit()
+    return get_target(conn, target_id)
+
+
+def list_import_batches(conn, campaign_id=None):
+    params = []
+    where = ""
+    if campaign_id is not None:
+        where = "WHERE campaign_id = ?"
+        params.append(campaign_id)
+    rows = _rows_to_dicts(
+        conn.execute(
+            f"""
+            SELECT
+                id, campaign_id, original_filename, stored_filename, source,
+                status, total_rows, valid_rows, invalid_rows, imported_rows,
+                validation_errors, created_at, updated_at, completed_at
+            FROM simulation_import_batches
+            {where}
+            ORDER BY created_at DESC, id DESC
+            """,
+            params,
+        )
+    )
     for row in rows:
-        for field in ("opened", "forwarded", "deleted", "link_clicked", "attachment_opened"):
-            row[field] = _bool(row[field])
+        row["validation_errors"] = _json_list(row.get("validation_errors"))
     return rows
+
+
+def parse_target_csv(csv_content, default_channel="email"):
+    """Parse target CSV content and return valid rows plus displayable errors."""
+    content = csv_content.decode("utf-8-sig") if isinstance(csv_content, bytes) else str(csv_content or "")
+    stream = StringIO(content)
+    reader = csv.DictReader(stream)
+    if not reader.fieldnames:
+        return {
+            "rows": [],
+            "errors": [{"row": 1, "message": "CSV file must include a header row."}],
+            "total_rows": 0,
+        }
+
+    headers = {(_normalize_text(header) or "").lower() for header in reader.fieldnames}
+    unknown_headers = sorted(header for header in headers if header and header not in TARGET_CSV_COLUMNS)
+    header_errors = [
+        {
+            "row": 1,
+            "message": "Unsupported CSV column: {}".format(header),
+        }
+        for header in unknown_headers
+    ]
+
+    rows = []
+    errors = list(header_errors)
+    seen_contacts = set()
+    total_rows = 0
+
+    for row_number, row in enumerate(reader, start=2):
+        total_rows += 1
+        normalized_row = {
+            (_normalize_text(key) or "").lower(): value
+            for key, value in row.items()
+            if key is not None
+        }
+        try:
+            payload = _normalize_target_payload(normalized_row, default_channel=default_channel, source="csv")
+            contact_key = (
+                payload["email"] or "",
+                payload["phone"] or "",
+                payload["channel"],
+            )
+            if contact_key in seen_contacts:
+                raise ValueError("Duplicate target contact in CSV.")
+            seen_contacts.add(contact_key)
+            payload["row_number"] = row_number
+            rows.append(payload)
+        except ValueError as exc:
+            errors.append({"row": row_number, "message": str(exc)})
+
+    return {
+        "rows": rows,
+        "errors": errors,
+        "total_rows": total_rows,
+    }
+
+
+def import_targets_csv(conn, campaign_id, csv_content, original_filename=None, stored_filename=None):
+    campaign = get_campaign(conn, campaign_id)
+    if not campaign:
+        raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
+
+    parsed = parse_target_csv(csv_content, default_channel=campaign["channel"])
+    existing_contacts = {
+        (target.get("email") or "", target.get("phone") or "", target.get("channel"))
+        for target in list_targets(conn, campaign_id, include_archived=False)
+    }
+    importable_rows = []
+    errors = list(parsed["errors"])
+    for row in parsed["rows"]:
+        contact_key = (row["email"] or "", row["phone"] or "", row["channel"])
+        if contact_key in existing_contacts:
+            errors.append({
+                "row": row["row_number"],
+                "message": "Duplicate target contact already exists in this campaign.",
+            })
+        else:
+            existing_contacts.add(contact_key)
+            importable_rows.append(row)
+
+    now = _utc_now()
+    status = "completed" if not errors else "completed_with_errors"
+    cursor = conn.execute(
+        """
+        INSERT INTO simulation_import_batches (
+            campaign_id, original_filename, stored_filename, source, status,
+            total_rows, valid_rows, invalid_rows, imported_rows,
+            validation_errors, created_at, updated_at, completed_at
+        )
+        VALUES (?, ?, ?, 'csv', ?, ?, ?, ?, 0, ?, ?, ?, ?)
+        """,
+        (
+            campaign_id,
+            _normalize_text(original_filename),
+            _normalize_text(stored_filename),
+            status,
+            parsed["total_rows"],
+            len(importable_rows),
+            len(errors),
+            json.dumps(errors, sort_keys=True),
+            now,
+            now,
+            now,
+        ),
+    )
+    batch_id = cursor.lastrowid
+
+    imported = []
+    for row in importable_rows:
+        target = create_target(
+            conn,
+            campaign_id,
+            name=row["name"],
+            display_name=row["display_name"],
+            email=row["email"],
+            phone=row["phone"],
+            department=row["department"],
+            manager=row["manager"],
+            source="csv",
+            active=row["active"],
+            channel=row["channel"],
+            import_batch_id=batch_id,
+        )
+        imported.append(target)
+
+    now = _utc_now()
+    conn.execute(
+        """
+        UPDATE simulation_import_batches
+        SET imported_rows = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (len(imported), now, batch_id),
+    )
+    conn.commit()
+    return {
+        "batch": list_import_batches(conn, campaign_id)[0],
+        "targets": imported,
+        "errors": errors,
+    }
 
 
 def get_campaign_metrics(conn, campaign_id=None):

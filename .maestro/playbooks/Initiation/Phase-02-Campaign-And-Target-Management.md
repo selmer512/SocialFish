@@ -25,11 +25,18 @@ This phase turns the prototype into a usable campaign management workflow for th
   - `simulation_import_batches` tracks CSV upload metadata, row counts, validation errors, status, and audit timestamps.
   - `tests/test_simulation_migration.py` covers idempotent migration from both a blank database and an existing Phase 01 schema.
 
-- [ ] Implement campaign and target services:
+- [x] Implement campaign and target services:
   - Add create, update, archive, list, and detail functions for campaigns
   - Add manual target create/update/archive functions
   - Add CSV parsing and validation functions for target imports using standard library CSV handling where possible
   - Normalize phone and email validation errors into messages that can be displayed in the UI
+
+  Notes for follow-on tasks:
+  - `core/simulation_service.py` now exposes campaign CRUD/detail helpers: `create_campaign`, `update_campaign`, `archive_campaign`, `get_campaign`, `get_campaign_detail`, and an expanded `list_campaigns(include_archived=False)`.
+  - Target management helpers now include `create_target`, `update_target`, `archive_target`, `get_target`, and `list_targets(..., include_archived=False)`; archived targets are hidden by default but remain available for history/metrics when requested.
+  - CSV imports use standard library `csv.DictReader` through `parse_target_csv` and `import_targets_csv`, producing row-numbered `{"row": ..., "message": ...}` validation errors for UI flash/panel rendering.
+  - Email addresses are normalized to lowercase, phone numbers are normalized to compact E.164-like digits/leading `+`, and channel-specific contact requirements are enforced for email, SMS, and voice.
+  - `tests/test_simulation_service.py` covers campaign CRUD/archive/detail, manual target validation/archive, CSV parse errors, duplicate contact handling, and import batch accounting.
 
 - [ ] Add authenticated campaign management routes:
   - `GET /simulations/campaigns` lists campaigns with channel, status, target count, and key metrics
