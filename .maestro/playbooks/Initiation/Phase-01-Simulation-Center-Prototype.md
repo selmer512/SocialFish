@@ -53,11 +53,18 @@ This phase creates a self-contained working prototype for a UI-first Cybersecuri
   - Installed dependencies from `requirements.txt` because `Flask` was missing in the active Python environment.
   - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service tests.test_simulation_routes`.
 
-- [ ] Create integrated admin UI templates for the prototype:
+- [x] Create integrated admin UI templates for the prototype:
   - Add `templates/admin/simulations.html` with campaign summary cards, channel breakdowns for email/SMS/voice, and a target activity table
   - Add `templates/admin/ai_settings.html` with GUI-managed local/cloud provider options, model name, base URL, enabled state, and secret placeholder handling
   - Use the existing Bootstrap/static asset conventions and current admin template style
   - Include visible safety language that frames all workflows as authorized internal training simulations
+
+  Completion notes:
+  - Expanded `templates/admin/simulations.html` from the starter page into an integrated Bootstrap admin view with authorized-use safety language, campaign summary, aggregate metric tiles, email/SMS/voice channel breakdowns, and a target activity table.
+  - Expanded `templates/admin/ai_settings.html` into a GUI-managed local/cloud provider settings page with provider type, model name, base URL, description, enabled state, and write-only secret placeholder handling.
+  - Kept the existing `/creds` breadcrumb, Font Awesome, Bootstrap 4, and `theme.css` asset conventions used by the surrounding admin templates.
+  - Added route smoke assertions in `tests/test_simulation_routes.py` for the required rendered UI sections and secret placeholder language.
+  - Verified with `python -m unittest tests.test_simulation_migration tests.test_simulation_service tests.test_simulation_routes`.
 
 - [ ] Wire the new pages into the existing UI:
   - Add navigation links to Simulation Center and AI Settings wherever the current admin navigation is maintained

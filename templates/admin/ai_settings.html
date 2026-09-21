@@ -21,53 +21,103 @@
             </div>
             <div class="card-body card-block">
                 <div class="alert alert-info" role="alert">
-                    Configure model providers for authorized internal training simulations. Secrets are accepted by the API but are never rendered back.
+                    <strong>Authorized internal training simulations only.</strong>
+                    Configure model providers for approved awareness content. Secrets are accepted by the API but are never rendered back in pages or JSON responses.
                 </div>
+
+                <div class="row">
+                    <div class="col-md-8">
+                        <h3 class="title-5 m-b-35">AI Provider Configuration</h3>
+                    </div>
+                    <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-primary btn-sm" href="/simulations">
+                            <i class="fas fa-shield-alt"></i>&nbsp; Simulation Center
+                        </a>
+                    </div>
+                </div>
+
                 {% for provider in providers %}
-                <form action="/api/ai-settings" method="POST" class="form-horizontal">
+                <form action="/api/ai-settings" method="POST" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 20px;">
                     <input type="hidden" name="provider_id" value="{{ provider.id }}">
                     <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Provider</label></div>
+                        <div class="col col-md-3">
+                            <label class="form-control-label">Provider</label>
+                        </div>
                         <div class="col-12 col-md-9">
                             <input type="text" name="name" value="{{ provider.name }}" class="form-control">
-                            <small class="form-text text-muted">{{ provider.provider_type }} provider</small>
+                            <small class="form-text text-muted">
+                                {{ provider.provider_type|title }} provider for simulation content generation.
+                            </small>
                         </div>
                     </div>
                     <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Model</label></div>
+                        <div class="col col-md-3">
+                            <label class="form-control-label">Provider Type</label>
+                        </div>
+                        <div class="col-12 col-md-9">
+                            <select name="provider_type" class="form-control">
+                                <option value="local" {% if provider.provider_type == "local" %}selected{% endif %}>Local</option>
+                                <option value="cloud" {% if provider.provider_type == "cloud" %}selected{% endif %}>Cloud</option>
+                            </select>
+                            <small class="form-text text-muted">Implementation-neutral provider mode; Phase 01 does not require live credentials.</small>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3">
+                            <label class="form-control-label">Model Name</label>
+                        </div>
                         <div class="col-12 col-md-9">
                             <input type="text" name="model_name" value="{{ provider.model_name }}" class="form-control">
+                            <small class="form-text text-muted">Use a descriptive local or hosted model identifier for authorized training scenarios.</small>
                         </div>
                     </div>
                     <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Base URL</label></div>
+                        <div class="col col-md-3">
+                            <label class="form-control-label">Base URL</label>
+                        </div>
                         <div class="col-12 col-md-9">
                             <input type="text" name="base_url" value="{{ provider.base_url }}" class="form-control">
+                            <small class="form-text text-muted">Endpoint used by future provider integrations.</small>
                         </div>
                     </div>
                     <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Secret</label></div>
+                        <div class="col col-md-3">
+                            <label class="form-control-label">Description</label>
+                        </div>
                         <div class="col-12 col-md-9">
-                            <input type="password" name="secret" placeholder="{{ 'Configured' if provider.secret_configured else 'Not configured' }}" class="form-control">
+                            <textarea name="description" rows="3" class="form-control">{{ provider.description }}</textarea>
                         </div>
                     </div>
                     <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Enabled</label></div>
+                        <div class="col col-md-3">
+                            <label class="form-control-label">Secret</label>
+                        </div>
+                        <div class="col-12 col-md-9">
+                            <input type="password" name="secret" placeholder="{{ 'Configured - enter a new value to replace' if provider.secret_configured else 'Not configured - optional in Phase 01' }}" class="form-control" autocomplete="new-password">
+                            <small class="form-text text-muted">
+                                Secret placeholder: {{ "configured" if provider.secret_configured else "not configured" }}. Existing secret values are write-only and never displayed.
+                            </small>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3">
+                            <label class="form-control-label">Enabled</label>
+                        </div>
                         <div class="col-12 col-md-9">
                             <label class="switch switch-text switch-info switch-pill">
                                 <input type="checkbox" name="enabled" class="switch-input" {% if provider.enabled %}checked{% endif %}>
                                 <span data-on="On" data-off="Off" class="switch-label"></span>
                                 <span class="switch-handle"></span>
                             </label>
+                            <small class="form-text text-muted">Controls whether this provider can be selected by future simulation workflows.</small>
                         </div>
                     </div>
-                    <div class="card-footer" style="text-align: right;">
+                    <div class="card-footer" style="text-align: right; margin-left: -20px; margin-right: -20px; margin-bottom: -20px;">
                         <button type="submit" class="btn btn-primary btn-sm">
-                            <i class="fa fa-dot-circle-o"></i> Save
+                            <i class="fa fa-dot-circle-o"></i> Save Provider
                         </button>
                     </div>
                 </form>
-                <hr>
                 {% endfor %}
             </div>
         </div>

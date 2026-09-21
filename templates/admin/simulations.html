@@ -21,34 +21,124 @@
             </div>
             <div class="card-body card-block">
                 <div class="alert alert-info" role="alert">
-                    Authorized internal training simulations only. No external delivery is configured in this Phase 01 prototype.
+                    <strong>Authorized internal training simulations only.</strong>
+                    This prototype is for approved awareness exercises in controlled environments. Phase 01 uses demo data and does not send email, SMS, or voice traffic.
                 </div>
-                <h4 class="mb-3">Campaigns</h4>
-                {% for campaign in campaigns %}
-                <p>
-                    <strong>{{ campaign.name }}</strong>
-                    <br>
-                    <small>{{ campaign.authorized_scope }}</small>
-                </p>
-                {% endfor %}
-                <h4 class="mb-3">Aggregate Metrics</h4>
+
                 <div class="row">
-                    <div class="col-md-2"><strong>{{ metrics.aggregate.total_targets }}</strong><br><small>Targets</small></div>
-                    <div class="col-md-2"><strong>{{ metrics.aggregate.delivered }}</strong><br><small>Delivered</small></div>
-                    <div class="col-md-2"><strong>{{ metrics.aggregate.opened }}</strong><br><small>Opened</small></div>
-                    <div class="col-md-2"><strong>{{ metrics.aggregate.link_clicked }}</strong><br><small>Clicked</small></div>
-                    <div class="col-md-2"><strong>{{ metrics.aggregate.attachment_opened }}</strong><br><small>Attachments</small></div>
+                    <div class="col-md-8">
+                        <h3 class="title-5 m-b-35">Simulation Center</h3>
+                    </div>
+                    <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-secondary btn-sm" href="/api/simulations/metrics" target="_blank" rel="nofollow">
+                            <i class="fas fa-chart-line"></i>&nbsp; Metrics JSON
+                        </a>
+                        <a class="btn btn-primary btn-sm" href="/ai-settings">
+                            <i class="fas fa-cogs"></i>&nbsp; AI Settings
+                        </a>
+                    </div>
                 </div>
+
+                <div class="row">
+                    {% for campaign in campaigns %}
+                    <div class="col-md-12">
+                        <div style="border: 1px solid #e5e5e5; margin-bottom: 20px;">
+                            <div style="padding: 12px 20px; border-bottom: 1px solid #e5e5e5; background: #f7f7f7;">
+                                <strong>{{ campaign.name }}</strong>
+                                <span class="badge badge-info">{{ campaign.status }}</span>
+                            </div>
+                            <div style="padding: 20px;">
+                                <p>{{ campaign.description }}</p>
+                                <small class="form-text text-muted">
+                                    Scope: {{ campaign.authorized_scope }} |
+                                    Channel mix: {{ campaign.channel }} |
+                                    Targets: {{ campaign.target_count }}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="statistic__item statistic__item--blue">
+                            <h2 class="number">{{ metrics.aggregate.total_targets }}</h2>
+                            <span class="desc">training targets</span>
+                            <div class="icon"><i class="fas fa-users"></i></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="statistic__item statistic__item--green">
+                            <h2 class="number">{{ metrics.aggregate.delivered }}</h2>
+                            <span class="desc">delivered</span>
+                            <div class="icon"><i class="fas fa-paper-plane"></i></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="statistic__item statistic__item--orange">
+                            <h2 class="number">{{ metrics.aggregate.opened }}</h2>
+                            <span class="desc">opened</span>
+                            <div class="icon"><i class="fas fa-envelope-open"></i></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="statistic__item statistic__item--red">
+                            <h2 class="number">{{ metrics.aggregate.link_clicked }}</h2>
+                            <span class="desc">links clicked</span>
+                            <div class="icon"><i class="fas fa-mouse-pointer"></i></div>
+                        </div>
+                    </div>
+                </div>
+
                 <hr>
+
+                <h4 class="mb-3">Channel Breakdown</h4>
+                <div class="row">
+                    {% for channel in ["email", "sms", "voice"] %}
+                    {% set channel_metrics = metrics.channels.get(channel, {}) %}
+                    <div class="col-md-4">
+                        <div style="border: 1px solid #e5e5e5; margin-bottom: 20px;">
+                            <div style="padding: 12px 20px; border-bottom: 1px solid #e5e5e5; background: #f7f7f7;">
+                                {% if channel == "email" %}
+                                <i class="fas fa-envelope"></i>
+                                {% elif channel == "sms" %}
+                                <i class="fas fa-sms"></i>
+                                {% else %}
+                                <i class="fas fa-phone"></i>
+                                {% endif %}
+                                <strong>{{ channel|upper }}</strong>
+                            </div>
+                            <div style="padding: 20px;">
+                                <div class="row">
+                                    <div class="col-6"><small>Targets</small><br><strong>{{ channel_metrics.get("total_targets", 0) }}</strong></div>
+                                    <div class="col-6"><small>Delivered</small><br><strong>{{ channel_metrics.get("delivered", 0) }}</strong></div>
+                                    <div class="col-6"><small>Opened</small><br><strong>{{ channel_metrics.get("opened", 0) }}</strong></div>
+                                    <div class="col-6"><small>Forwarded</small><br><strong>{{ channel_metrics.get("forwarded", 0) }}</strong></div>
+                                    <div class="col-6"><small>Deleted</small><br><strong>{{ channel_metrics.get("deleted", 0) }}</strong></div>
+                                    <div class="col-6"><small>Clicked</small><br><strong>{{ channel_metrics.get("link_clicked", 0) }}</strong></div>
+                                    <div class="col-12"><small>Attachments opened</small><br><strong>{{ channel_metrics.get("attachment_opened", 0) }}</strong></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <hr>
+
                 <h4 class="mb-3">Target Activity</h4>
                 <div class="table-responsive table-responsive-data2">
                     <table class="table table-data2">
                         <thead>
                             <tr>
                                 <th>Name</th>
+                                <th>Department</th>
                                 <th>Channel</th>
                                 <th>Status</th>
                                 <th>Opened</th>
+                                <th>Forwarded</th>
+                                <th>Deleted</th>
                                 <th>Clicked</th>
                                 <th>Attachment</th>
                             </tr>
@@ -56,10 +146,17 @@
                         <tbody>
                             {% for target in targets %}
                             <tr class="tr-shadow">
-                                <td>{{ target.name }}</td>
-                                <td>{{ target.channel }}</td>
+                                <td>
+                                    {{ target.name }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ target.email or target.phone }}</small>
+                                </td>
+                                <td>{{ target.department }}</td>
+                                <td><span class="badge badge-secondary">{{ target.channel }}</span></td>
                                 <td>{{ target.delivery_status }}</td>
                                 <td>{{ "yes" if target.opened else "no" }}</td>
+                                <td>{{ "yes" if target.forwarded else "no" }}</td>
+                                <td>{{ "yes" if target.deleted else "no" }}</td>
                                 <td>{{ "yes" if target.link_clicked else "no" }}</td>
                                 <td>{{ "yes" if target.attachment_opened else "no" }}</td>
                             </tr>

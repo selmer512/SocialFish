@@ -64,8 +64,21 @@ class SimulationRoutesTest(unittest.TestCase):
 
         self.assertEqual(simulations.status_code, 200)
         self.assertIn(b"Authorized internal training simulations only", simulations.data)
+        self.assertIn(b"Simulation Center", simulations.data)
+        self.assertIn(b"Channel Breakdown", simulations.data)
+        self.assertIn(b"EMAIL", simulations.data)
+        self.assertIn(b"SMS", simulations.data)
+        self.assertIn(b"VOICE", simulations.data)
+        self.assertIn(b"Target Activity", simulations.data)
+        self.assertIn(b"Attachments opened", simulations.data)
         self.assertEqual(ai_settings.status_code, 200)
         self.assertIn(b"Secrets are accepted by the API but are never rendered back", ai_settings.data)
+        self.assertIn(b"AI Provider Configuration", ai_settings.data)
+        self.assertIn(b"Provider Type", ai_settings.data)
+        self.assertIn(b"Model Name", ai_settings.data)
+        self.assertIn(b"Base URL", ai_settings.data)
+        self.assertIn(b"Secret placeholder", ai_settings.data)
+        self.assertIn(b"Save Provider", ai_settings.data)
 
     def test_metrics_api_returns_seeded_channel_data(self):
         response = self.client.get("/api/simulations/metrics")
