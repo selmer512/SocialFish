@@ -8,6 +8,81 @@
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqiyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
     <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
     <link href="/css/theme.css" rel="stylesheet" media="all">
+    <style>
+        .ai-builder-shell {
+            display: grid;
+            grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+            grid-gap: 20px;
+            align-items: start;
+        }
+
+        .ai-panel {
+            border: 1px solid #e5e5e5;
+            border-radius: 6px;
+            padding: 20px;
+            background: #fff;
+        }
+
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-gap: 14px;
+        }
+
+        .preview-pane {
+            border: 1px solid #e3e7ed;
+            border-radius: 6px;
+            background: #fbfcfe;
+            min-height: 260px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .preview-pane.is-disabled {
+            opacity: .58;
+        }
+
+        .preview-header {
+            border-bottom: 1px solid #e3e7ed;
+            padding: 12px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .preview-body {
+            padding: 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            flex: 1;
+        }
+
+        .preview-subject {
+            border-bottom: 1px dashed #d4d9e2;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .badge-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @media (max-width: 991px) {
+            .ai-builder-shell,
+            .preview-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
 <body>
     <br>
@@ -21,6 +96,7 @@
                     <strong>Authorized internal training simulations only.</strong>
                     Generate draft content for approved security awareness campaigns using UI-managed provider settings.
                 </div>
+                <div id="ai-builder-alert" class="alert hidden" role="alert"></div>
                 <div class="row">
                     <div class="col-md-8">
                         <h3 class="title-5 m-b-35">AI Scenario Builder</h3>
@@ -31,87 +107,300 @@
                         </a>
                     </div>
                 </div>
-                <form action="/api/simulations/ai/generate" method="POST" class="form-horizontal">
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Campaign</label></div>
-                        <div class="col-12 col-md-9">
-                            <select name="campaign_id" class="form-control">
-                                {% for campaign in campaigns %}
-                                <option value="{{ campaign.id }}">{{ campaign.name }}</option>
+                <div class="ai-builder-shell">
+                    <form id="ai-builder-form" action="/api/simulations/ai/generate" method="POST" class="form-horizontal ai-panel">
+                        <div class="row form-group">
+                            <div class="col col-md-4"><label class="form-control-label">Campaign</label></div>
+                            <div class="col-12 col-md-8">
+                                <select id="campaign-id" name="campaign_id" class="form-control" required>
+                                    {% for campaign in campaigns %}
+                                    <option value="{{ campaign.id }}">{{ campaign.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-4"><label class="form-control-label">Provider</label></div>
+                            <div class="col-12 col-md-8">
+                                <select id="provider-id" name="provider_id" class="form-control" required>
+                                    {% for provider in providers %}
+                                    <option value="{{ provider.id }}" {% if not provider.enabled %}disabled{% endif %}>
+                                        {{ provider.name }}{% if not provider.enabled %} - disabled{% endif %}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <small class="form-text text-muted">Disabled providers cannot be used for generation.</small>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-4"><label class="form-control-label">Audience</label></div>
+                            <div class="col-12 col-md-8"><input type="text" name="audience" class="form-control" placeholder="Finance team" required></div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-4"><label class="form-control-label">Scenario Objective</label></div>
+                            <div class="col-12 col-md-8"><textarea name="scenario_goal" rows="4" class="form-control" required></textarea></div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-4"><label class="form-control-label">Channels</label></div>
+                            <div class="col-12 col-md-8">
+                                {% for channel in channels %}
+                                <label class="checkbox-inline mr-3">
+                                    <input type="checkbox" name="channels" value="{{ channel }}" {% if channel == "email" %}checked{% endif %}>
+                                    {% if channel == "email" %}<i class="fas fa-envelope"></i>{% elif channel == "sms" %}<i class="fas fa-sms"></i>{% else %}<i class="fas fa-phone"></i>{% endif %}
+                                    {{ channel|upper }}
+                                </label>
                                 {% endfor %}
-                            </select>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-4"><label class="form-control-label">Tone</label></div>
+                            <div class="col-12 col-md-8">
+                                <select name="tone" class="form-control">
+                                    {% for tone in tones %}
+                                    <option value="{{ tone }}">{{ tone|title }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-4"><label class="form-control-label">Difficulty</label></div>
+                            <div class="col-12 col-md-8">
+                                <select name="difficulty" class="form-control">
+                                    {% for difficulty in difficulties %}
+                                    <option value="{{ difficulty }}">{{ difficulty|title }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-4"><label class="form-control-label">Training Reminder</label></div>
+                            <div class="col-12 col-md-8"><textarea name="training_reminder" rows="3" class="form-control" placeholder="Use the report button before taking action."></textarea></div>
+                        </div>
+                        <div style="text-align: right;">
+                            <button id="generate-button" type="submit" class="btn btn-primary btn-sm">
+                                <i class="fas fa-magic"></i> Generate Drafts
+                            </button>
+                        </div>
+                    </form>
+
+                    <div class="ai-panel">
+                        <div class="d-flex justify-content-between align-items-start mb-3">
+                            <div>
+                                <h4 class="mb-1">Draft Review</h4>
+                                <small class="form-text text-muted">Review channel-specific output, safety notes, and risk flags before saving.</small>
+                            </div>
+                            <button id="save-draft-button" type="button" class="btn btn-success btn-sm" disabled>
+                                <i class="fas fa-save"></i> Save Selected Drafts
+                            </button>
+                        </div>
+
+                        <div class="preview-grid">
+                            <div class="preview-pane" data-preview-pane="email">
+                                <div class="preview-header">
+                                    <strong><i class="fas fa-envelope"></i> Email</strong>
+                                    <label class="mb-0"><input type="checkbox" class="save-channel" value="email" checked disabled> Save</label>
+                                </div>
+                                <div class="preview-body">
+                                    <div class="preview-subject" data-draft-field="email_subject">No email subject generated yet.</div>
+                                    <div data-draft-field="email_body">Generate drafts to preview email content.</div>
+                                </div>
+                            </div>
+                            <div class="preview-pane" data-preview-pane="sms">
+                                <div class="preview-header">
+                                    <strong><i class="fas fa-sms"></i> SMS</strong>
+                                    <label class="mb-0"><input type="checkbox" class="save-channel" value="sms" disabled> Save</label>
+                                </div>
+                                <div class="preview-body" data-draft-field="sms_body">Generate drafts to preview SMS content.</div>
+                            </div>
+                            <div class="preview-pane" data-preview-pane="voice">
+                                <div class="preview-header">
+                                    <strong><i class="fas fa-phone"></i> Voice</strong>
+                                    <label class="mb-0"><input type="checkbox" class="save-channel" value="voice" disabled> Save</label>
+                                </div>
+                                <div class="preview-body" data-draft-field="voice_script">Generate drafts to preview voice content.</div>
+                            </div>
+                        </div>
+
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <h5 class="mb-2">Risk Flags</h5>
+                                <div id="risk-flags" class="badge-list">
+                                    <span class="badge badge-secondary">No flags yet</span>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h5 class="mb-2">Safety Notes</h5>
+                                <ul id="safety-notes" class="mb-0">
+                                    <li class="text-muted">Generate drafts to see safety notes.</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <h5 class="mb-2">Landing Text</h5>
+                                <div class="alert alert-secondary mb-0" data-draft-field="landing_text">No landing text generated yet.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <h5 class="mb-2">Training Text</h5>
+                                <div class="alert alert-secondary mb-0" data-draft-field="training_text">No training text generated yet.</div>
+                            </div>
                         </div>
                     </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Provider</label></div>
-                        <div class="col-12 col-md-9">
-                            <select name="provider_id" class="form-control">
-                                {% for provider in providers %}
-                                <option value="{{ provider.id }}" {% if not provider.enabled %}disabled{% endif %}>
-                                    {{ provider.name }}{% if not provider.enabled %} - disabled{% endif %}
-                                </option>
-                                {% endfor %}
-                            </select>
-                            <small class="form-text text-muted">Disabled providers cannot be used for generation.</small>
-                        </div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Audience</label></div>
-                        <div class="col-12 col-md-9"><input type="text" name="audience" class="form-control" placeholder="Finance team" required></div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Scenario Objective</label></div>
-                        <div class="col-12 col-md-9"><textarea name="scenario_goal" rows="3" class="form-control" required></textarea></div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Channels</label></div>
-                        <div class="col-12 col-md-9">
-                            {% for channel in channels %}
-                            <label class="checkbox-inline mr-3">
-                                <input type="checkbox" name="channels" value="{{ channel }}" {% if channel == "email" %}checked{% endif %}>
-                                {{ channel|upper }}
-                            </label>
-                            {% endfor %}
-                        </div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Tone</label></div>
-                        <div class="col-12 col-md-4">
-                            <select name="tone" class="form-control">
-                                {% for tone in tones %}
-                                <option value="{{ tone }}">{{ tone|title }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col col-md-2"><label class="form-control-label">Difficulty</label></div>
-                        <div class="col-12 col-md-3">
-                            <select name="difficulty" class="form-control">
-                                {% for difficulty in difficulties %}
-                                <option value="{{ difficulty }}">{{ difficulty|title }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Training Reminder</label></div>
-                        <div class="col-12 col-md-9"><textarea name="training_reminder" rows="2" class="form-control"></textarea></div>
-                    </div>
-                    <div class="card-footer" style="text-align: right;">
-                        <button type="submit" class="btn btn-primary btn-sm">
-                            <i class="fas fa-magic"></i> Generate Drafts
-                        </button>
-                    </div>
-                </form>
-                <hr>
-                <h4 class="mb-3">API Save Endpoint</h4>
-                <p class="text-muted">
-                    Approved drafts can be saved with <code>POST /api/simulations/ai/save-draft</code> and remain linked to the selected campaign.
-                </p>
+                </div>
             </div>
         </div>
     </div>
     <script src="/vendor/jquery-3.2.1.min.js"></script>
     <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
     <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+    <script>
+        (function () {
+            var currentGeneration = null;
+
+            function selectedChannels(selector) {
+                return $(selector).map(function () {
+                    return this.value;
+                }).get();
+            }
+
+            function setAlert(type, message) {
+                var $alert = $("#ai-builder-alert");
+                $alert.removeClass("hidden alert-success alert-danger alert-warning alert-info")
+                    .addClass("alert-" + type)
+                    .text(message);
+            }
+
+            function clearAlert() {
+                $("#ai-builder-alert").addClass("hidden").text("");
+            }
+
+            function setBusy(isBusy) {
+                $("#generate-button").prop("disabled", isBusy).html(
+                    isBusy ? '<i class="fas fa-spinner fa-spin"></i> Generating' : '<i class="fas fa-magic"></i> Generate Drafts'
+                );
+            }
+
+            function fieldText(draft, field, fallback) {
+                return draft && draft[field] ? draft[field] : fallback;
+            }
+
+            function renderBadges(target, values, emptyText, badgeClass) {
+                var $target = $(target).empty();
+                if (!values || !values.length) {
+                    $("<span>").addClass("badge badge-secondary").text(emptyText).appendTo($target);
+                    return;
+                }
+                values.forEach(function (value) {
+                    $("<span>").addClass("badge " + badgeClass).text(value).appendTo($target);
+                });
+            }
+
+            function renderList(target, values, emptyText) {
+                var $target = $(target).empty();
+                if (!values || !values.length) {
+                    $("<li>").addClass("text-muted").text(emptyText).appendTo($target);
+                    return;
+                }
+                values.forEach(function (value) {
+                    $("<li>").text(value).appendTo($target);
+                });
+            }
+
+            function updatePreview(generation) {
+                var draft = generation.draft || {};
+                var channels = generation.channels || [];
+                currentGeneration = generation;
+
+                $('[data-draft-field="email_subject"]').text(fieldText(draft, "email_subject", "No email subject generated."));
+                $('[data-draft-field="email_body"]').text(fieldText(draft, "email_body", "Email was not requested in this generation."));
+                $('[data-draft-field="sms_body"]').text(fieldText(draft, "sms_body", "SMS was not requested in this generation."));
+                $('[data-draft-field="voice_script"]').text(fieldText(draft, "voice_script", "Voice was not requested in this generation."));
+                $('[data-draft-field="landing_text"]').text(fieldText(draft, "landing_text", "No landing text generated."));
+                $('[data-draft-field="training_text"]').text(fieldText(draft, "training_text", "No training text generated."));
+
+                $(".save-channel").each(function () {
+                    var enabled = channels.indexOf(this.value) !== -1;
+                    $(this).prop("disabled", !enabled).prop("checked", enabled);
+                    $('[data-preview-pane="' + this.value + '"]').toggleClass("is-disabled", !enabled);
+                });
+
+                renderBadges("#risk-flags", generation.risk_flags, "No risk flags", "badge-warning");
+                renderList("#safety-notes", generation.safety_notes, "No safety notes returned.");
+                $("#save-draft-button").prop("disabled", channels.length === 0);
+            }
+
+            $("#ai-builder-form").on("submit", function (event) {
+                event.preventDefault();
+                clearAlert();
+                setBusy(true);
+
+                var payload = {
+                    campaign_id: $("#campaign-id").val(),
+                    provider_id: $("#provider-id").val(),
+                    audience: $('[name="audience"]').val(),
+                    scenario_goal: $('[name="scenario_goal"]').val(),
+                    channels: selectedChannels('[name="channels"]:checked'),
+                    tone: $('[name="tone"]').val(),
+                    difficulty: $('[name="difficulty"]').val(),
+                    training_reminder: $('[name="training_reminder"]').val()
+                };
+
+                $.ajax({
+                    url: "/api/simulations/ai/generate",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify(payload)
+                }).done(function (response) {
+                    updatePreview(response.generation);
+                    setAlert("success", "Drafts generated. Review the previews and save selected channels when ready.");
+                }).fail(function (xhr) {
+                    var error = xhr.responseJSON && xhr.responseJSON.error;
+                    setAlert("danger", error ? error.message : "AI generation failed.");
+                    if (error && error.risk_flags) {
+                        renderBadges("#risk-flags", error.risk_flags, "No risk flags", "badge-danger");
+                    }
+                }).always(function () {
+                    setBusy(false);
+                });
+            });
+
+            $("#save-draft-button").on("click", function () {
+                if (!currentGeneration) {
+                    setAlert("warning", "Generate drafts before saving.");
+                    return;
+                }
+
+                var channels = selectedChannels(".save-channel:checked");
+                if (!channels.length) {
+                    setAlert("warning", "Select at least one generated channel to save.");
+                    return;
+                }
+
+                $("#save-draft-button").prop("disabled", true).html('<i class="fas fa-spinner fa-spin"></i> Saving');
+                $.ajax({
+                    url: "/api/simulations/ai/save-draft",
+                    method: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify({
+                        campaign_id: $("#campaign-id").val(),
+                        provider: currentGeneration.provider,
+                        channels: channels,
+                        draft: currentGeneration.draft,
+                        risk_flags: currentGeneration.risk_flags,
+                        safety_notes: currentGeneration.safety_notes,
+                        metadata: currentGeneration.metadata
+                    })
+                }).done(function () {
+                    setAlert("success", "Selected drafts saved to the campaign.");
+                }).fail(function (xhr) {
+                    var error = xhr.responseJSON && xhr.responseJSON.error;
+                    setAlert("danger", error ? error.message : "Saving the selected drafts failed.");
+                }).always(function () {
+                    $("#save-draft-button").prop("disabled", false).html('<i class="fas fa-save"></i> Save Selected Drafts');
+                });
+            });
+        })();
+    </script>
 </body>
 </html>

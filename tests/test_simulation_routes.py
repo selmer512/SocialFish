@@ -104,6 +104,14 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"AI Scenario Builder", ai_builder.data)
         self.assertIn(b"Authorized internal training simulations only", ai_builder.data)
         self.assertIn(b"/api/simulations/ai/generate", ai_builder.data)
+        self.assertIn(b"Draft Review", ai_builder.data)
+        self.assertIn(b"Save Selected Drafts", ai_builder.data)
+        self.assertIn(b"Risk Flags", ai_builder.data)
+        self.assertIn(b"Safety Notes", ai_builder.data)
+        self.assertIn(b'data-preview-pane="email"', ai_builder.data)
+        self.assertIn(b'data-preview-pane="sms"', ai_builder.data)
+        self.assertIn(b'data-preview-pane="voice"', ai_builder.data)
+        self.assertIn(b"/api/simulations/ai/save-draft", ai_builder.data)
 
     def test_ai_generation_api_generates_and_saves_campaign_draft(self):
         campaign_id = self._campaign_id()

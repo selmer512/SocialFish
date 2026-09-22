@@ -33,7 +33,7 @@ This phase adds an implementation-neutral AI layer for creating authorized train
   - Added `ai_campaign_drafts` schema plus service helpers so saved AI drafts are persisted as campaign-linked simulation content without overwriting history.
   - Added route tests for builder rendering, local mock generation, draft saving, blocked content errors, disabled provider errors, and secret redaction.
 
-- [ ] Build the AI scenario builder UI:
+- [x] Build the AI scenario builder UI:
   - Add a form for campaign, audience, channel selection, tone, difficulty, scenario objective, and training reminder
   - Show separate preview panes for email, SMS, and voice outputs
   - Show risk flags and safety notes next to generated drafts
