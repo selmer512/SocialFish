@@ -23,7 +23,9 @@ from core.simulation_service import (
     list_simulation_events,
     list_targets,
     parse_target_csv,
+    record_provider_webhook_event,
     record_simulation_event,
+    record_tracking_token_event,
     run_delivery_job,
     save_ai_campaign_draft,
     update_campaign,
@@ -548,6 +550,55 @@ Broken Voice,,,voice,Support,Morgan
         status = get_delivery_job_status(self.conn, job_id)
         self.assertEqual(status["job"]["delivered_count"], 4)
         self.assertEqual(len(status["tracking_tokens"]), 12)
+
+    def test_tracking_token_events_update_token_counts_and_target_rollups(self):
+        created = create_delivery_job_from_campaign(self.conn, self.campaign_id)
+        token = next(
+            item for item in created["tracking_tokens"]
+            if item["token_type"] == "link"
+        )
+
+        result = record_tracking_token_event(
+            self.conn,
+            token["token"],
+            token_type="link",
+            metadata={"source": "unit-test"},
+        )
+
+        self.assertEqual(result["event"]["event_type"], "link_click")
+        self.assertEqual(result["event"]["tracking_token_id"], token["id"])
+        self.assertEqual(result["token"]["event_count"], 1)
+        self.assertIsNotNone(result["token"]["first_seen_at"])
+
+        target = self.conn.execute(
+            "SELECT link_clicked, link_clicked_at FROM simulation_targets WHERE id = ?",
+            (token["target_id"],),
+        ).fetchone()
+        self.assertEqual(target[0], 1)
+        self.assertIsNotNone(target[1])
+
+    def test_provider_webhook_records_valid_provider_event(self):
+        created = create_delivery_job_from_campaign(self.conn, self.campaign_id)
+        token = next(
+            item for item in created["tracking_tokens"]
+            if item["token_type"] == "open"
+        )
+
+        result = record_provider_webhook_event(
+            self.conn,
+            "email",
+            "dry_run_email",
+            {
+                "token": token["token"],
+                "event_type": "opened",
+                "provider_event_id": "evt-unit-test",
+            },
+        )
+
+        self.assertEqual(result["provider"]["provider_key"], "dry_run_email")
+        self.assertEqual(result["event"]["event_type"], "opened")
+        self.assertEqual(result["event"]["provider_reference_id"], result["provider"]["id"])
+        self.assertEqual(result["tracking_token"]["event_count"], 1)
 
 
 if __name__ == "__main__":

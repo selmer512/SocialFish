@@ -27,11 +27,14 @@ from core.simulation_service import (
     get_campaign_metrics,
     get_campaign_detail,
     get_delivery_job_status,
+    get_delivery_provider_by_key,
     import_targets_csv,
     list_ai_provider_settings,
     list_campaigns,
     list_targets,
+    record_provider_webhook_event,
     record_simulation_event,
+    record_tracking_token_event,
     run_delivery_job,
     save_ai_campaign_draft,
     update_campaign,
@@ -60,6 +63,7 @@ import flask_login
 import os
 import json
 import hashlib
+import hmac
 import asyncio
 import logging
 from pathlib import Path
@@ -96,6 +100,11 @@ TARGET_CSV_SAMPLE_ROWS = (
         "channel": "sms",
         "active": "true",
     },
+)
+TRACKING_PIXEL_GIF = (
+    b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00"
+    b"\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00"
+    b"\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
 )
 
 # Verificar argumentos
@@ -228,6 +237,31 @@ def _json_error(error_type, message, status_code=400, **extra):
     }
     payload["error"].update(extra)
     return jsonify(payload), status_code
+
+
+def _tracking_metadata(source):
+    return {
+        "source": source,
+        "ip": request.remote_addr,
+        "user_agent": request.headers.get("User-Agent"),
+    }
+
+
+def _provider_webhook_signature_valid(provider, body):
+    settings = provider.get("settings") or {}
+    secret = settings.get("webhook_secret") or settings.get("signature_secret")
+    if not secret:
+        return True
+    signature = (
+        request.headers.get("X-SocialFish-Signature")
+        or request.headers.get("X-Provider-Signature")
+        or request.headers.get("X-Hub-Signature-256")
+    )
+    if not signature:
+        return False
+    provided = signature.split("=", 1)[1] if "=" in signature else signature
+    expected = hmac.new(str(secret).encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(provided, expected)
 
 
 def _ai_generation_payload():
@@ -639,6 +673,67 @@ def simulation_delivery_status_api(job_id):
         return jsonify({"status": "ok", "delivery": get_delivery_job_status(g.db, job_id)})
     except ValueError as e:
         return _json_error("delivery_status_error", str(e), 404)
+
+
+@app.route("/simulations/track/open/<token>", methods=['GET'])
+def simulation_open_tracking_pixel(token):
+    try:
+        record_tracking_token_event(g.db, token, token_type="open", metadata=_tracking_metadata("open_pixel"))
+    except ValueError:
+        pass
+    return Response(
+        TRACKING_PIXEL_GIF,
+        mimetype="image/gif",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.route("/simulations/track/link/<token>", methods=['GET'])
+def simulation_link_tracking_redirect(token):
+    try:
+        result = record_tracking_token_event(g.db, token, token_type="link", metadata=_tracking_metadata("link_redirect"))
+        destination = result["token"].get("destination_url") or "/"
+    except ValueError:
+        destination = "/"
+    return redirect(destination)
+
+
+@app.route("/simulations/track/attachment/<token>", methods=['GET', 'POST'])
+def simulation_attachment_tracking_event(token):
+    try:
+        result = record_tracking_token_event(g.db, token, token_type="attachment", metadata=_tracking_metadata("attachment_event"))
+        return jsonify({"status": "ok", "event": result["event"]})
+    except ValueError as e:
+        return _json_error("tracking_token_error", str(e), 404)
+
+
+@app.route("/api/simulations/providers/<channel>/<provider_key>/webhook", methods=['POST'])
+def simulation_provider_webhook(channel, provider_key):
+    try:
+        provider = get_delivery_provider_by_key(g.db, channel, provider_key)
+        if not provider:
+            return _json_error("provider_webhook_error", "Unknown simulation delivery provider.", 404)
+        body = request.get_data() or b""
+        if not _provider_webhook_signature_valid(provider, body):
+            return _json_error("provider_webhook_signature_error", "Invalid provider webhook signature.", 401)
+        payload = request.get_json(silent=True) or request.form.to_dict()
+        result = record_provider_webhook_event(g.db, channel, provider_key, payload)
+        return jsonify({
+            "status": "ok",
+            "event": result["event"],
+            "tracking_token": result["tracking_token"],
+            "provider": {
+                "id": result["provider"]["id"],
+                "channel": result["provider"]["channel"],
+                "provider_key": result["provider"]["provider_key"],
+                "provider_type": result["provider"]["provider_type"],
+            },
+        })
+    except (TypeError, ValueError) as e:
+        return _json_error("provider_webhook_error", str(e), 400)
 
 
 @app.route("/simulations/campaigns/<int:campaign_id>", methods=['POST'])

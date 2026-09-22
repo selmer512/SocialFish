@@ -62,11 +62,17 @@ This phase adds simulation delivery orchestration and event tracking for email, 
   - Added a delivery status template showing job counters, provider snapshot, attempts, and tracking-token counts.
   - Verified with focused route coverage and `python -m unittest discover tests`.
 
-- [ ] Add tracking endpoints for simulation events:
+- [x] Add tracking endpoints for simulation events:
   - Add a pixel or lightweight open-tracking endpoint scoped to simulation tokens
   - Add a redirect endpoint that records link clicks and then redirects to the configured training destination
   - Add an attachment-event endpoint for recording simulated attachment opens in controlled training artifacts
   - Add webhook ingestion routes for future email/SMS/voice providers while validating signatures when configured
+
+  Completed 2026-09-22:
+  - Added public simulation tracking endpoints for open pixels, link redirects, and controlled attachment events.
+  - Added provider webhook ingestion for delivery providers with optional HMAC SHA-256 signature validation from database-managed provider settings.
+  - Added service helpers that resolve tracking tokens, increment token counters, record simulation events, and preserve target rollups.
+  - Verified with focused tracking tests and `python -m unittest discover tests`.
 
 - [ ] Build delivery UI surfaces:
   - Add delivery preview, start, and status panels on campaign detail pages

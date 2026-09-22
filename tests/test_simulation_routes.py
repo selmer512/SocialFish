@@ -1,5 +1,8 @@
 import importlib
+import hashlib
+import hmac
 import io
+import json
 import sqlite3
 import sys
 import tempfile
@@ -392,6 +395,114 @@ class SimulationRoutesTest(unittest.TestCase):
 
         self.assertEqual(missing_preview.status_code, 400)
         self.assertEqual(missing_preview_payload["error"]["type"], "delivery_preview_error")
+
+    def test_tracking_endpoints_record_open_link_and_attachment_events(self):
+        campaign_id = self._campaign_id()
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE simulation_campaigns SET training_url = ? WHERE id = ?",
+                ("https://training.example.test/module", campaign_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        start_response = self.client.post(
+            "/simulations/campaigns/{}/deliveries/start".format(campaign_id),
+            json={"mode": "dry_run"},
+        )
+        delivery = start_response.get_json()["delivery"]
+        open_token = next(token for token in delivery["tracking_tokens"] if token["token_type"] == "open")
+        link_token = next(token for token in delivery["tracking_tokens"] if token["token_type"] == "link")
+        attachment_token = next(token for token in delivery["tracking_tokens"] if token["token_type"] == "attachment")
+
+        open_response = self.client.get("/simulations/track/open/{}".format(open_token["token"]))
+        link_response = self.client.get("/simulations/track/link/{}".format(link_token["token"]))
+        attachment_response = self.client.post("/simulations/track/attachment/{}".format(attachment_token["token"]))
+        attachment_payload = attachment_response.get_json()
+
+        self.assertEqual(open_response.status_code, 200)
+        self.assertEqual(open_response.mimetype, "image/gif")
+        self.assertEqual(link_response.status_code, 302)
+        self.assertEqual(link_response.headers["Location"], "https://training.example.test/module")
+        self.assertEqual(attachment_response.status_code, 200)
+        self.assertEqual(attachment_payload["event"]["event_type"], "attachment_open")
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            event_rows = conn.execute(
+                """
+                SELECT event_type
+                FROM simulation_events
+                WHERE tracking_token_id IN (?, ?, ?)
+                ORDER BY id ASC
+                """,
+                (open_token["id"], link_token["id"], attachment_token["id"]),
+            ).fetchall()
+            token_counts = conn.execute(
+                """
+                SELECT SUM(event_count)
+                FROM simulation_tracking_tokens
+                WHERE id IN (?, ?, ?)
+                """,
+                (open_token["id"], link_token["id"], attachment_token["id"]),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertEqual([row[0] for row in event_rows], ["opened", "link_click", "attachment_open"])
+        self.assertEqual(token_counts, 3)
+
+    def test_provider_webhook_records_event_and_validates_configured_signature(self):
+        campaign_id = self._campaign_id()
+        start_response = self.client.post(
+            "/simulations/campaigns/{}/deliveries/start".format(campaign_id),
+            json={"mode": "dry_run"},
+        )
+        token = next(
+            item for item in start_response.get_json()["delivery"]["tracking_tokens"]
+            if item["token_type"] == "open"
+        )
+        body = json.dumps({
+            "token": token["token"],
+            "event_type": "opened",
+            "provider_event_id": "evt-route-test",
+        }).encode("utf-8")
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                UPDATE simulation_channel_providers
+                SET settings_json = ?
+                WHERE channel = 'email' AND provider_key = 'dry_run_email'
+                """,
+                (json.dumps({"webhook_secret": "route-secret"}),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        rejected = self.client.post(
+            "/api/simulations/providers/email/dry_run_email/webhook",
+            data=body,
+            content_type="application/json",
+            headers={"X-SocialFish-Signature": "bad-signature"},
+        )
+        signature = hmac.new(b"route-secret", body, hashlib.sha256).hexdigest()
+        accepted = self.client.post(
+            "/api/simulations/providers/email/dry_run_email/webhook",
+            data=body,
+            content_type="application/json",
+            headers={"X-SocialFish-Signature": "sha256={}".format(signature)},
+        )
+        accepted_payload = accepted.get_json()
+
+        self.assertEqual(rejected.status_code, 401)
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted_payload["status"], "ok")
+        self.assertEqual(accepted_payload["event"]["event_type"], "opened")
+        self.assertEqual(accepted_payload["provider"]["provider_key"], "dry_run_email")
 
     def test_ai_settings_api_does_not_echo_secret(self):
         conn = sqlite3.connect(self.db_path)

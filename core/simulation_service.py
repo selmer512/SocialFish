@@ -1559,6 +1559,94 @@ def get_tracking_token(conn, token_id):
     return _tracking_token_response(row) if row else None
 
 
+def get_tracking_token_by_value(conn, token):
+    row = _row_to_dict(
+        conn.execute(
+            "SELECT * FROM simulation_tracking_tokens WHERE token = ?",
+            (_normalize_text(token),),
+        )
+    )
+    return _tracking_token_response(row) if row else None
+
+
+def _tracking_event_type(token_type):
+    event_types = {
+        "open": "opened",
+        "link": "link_click",
+        "attachment": "attachment_open",
+    }
+    return event_types.get((_normalize_text(token_type) or "").lower())
+
+
+def _tracking_attempt(conn, token):
+    return _row_to_dict(
+        conn.execute(
+            """
+            SELECT id, provider_id, provider, provider_message_id
+            FROM simulation_delivery_attempts
+            WHERE delivery_job_id = ? AND target_id = ? AND channel = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (token.get("delivery_job_id"), token.get("target_id"), token.get("channel")),
+        )
+    )
+
+
+def record_tracking_token_event(conn, token_value, token_type=None, metadata=None):
+    """Record a public tracking-token event and update token counters."""
+    token = get_tracking_token_by_value(conn, token_value)
+    if not token:
+        raise ValueError("Unknown simulation tracking token.")
+
+    expected_type = (_normalize_text(token_type) or token["token_type"]).lower()
+    actual_type = (_normalize_text(token["token_type"]) or "").lower()
+    if expected_type != actual_type:
+        raise ValueError("Tracking token is not valid for {} events.".format(expected_type))
+
+    event_type = _tracking_event_type(actual_type)
+    if not event_type:
+        raise ValueError("Unsupported simulation tracking token type: {}".format(actual_type))
+
+    now = _utc_now()
+    conn.execute(
+        """
+        UPDATE simulation_tracking_tokens
+        SET first_seen_at = COALESCE(first_seen_at, ?),
+            last_seen_at = ?,
+            event_count = event_count + 1,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (now, now, now, token["id"]),
+    )
+    attempt = _tracking_attempt(conn, token) or {}
+    event_metadata = dict(metadata or {})
+    event_metadata.update({
+        "source": event_metadata.get("source") or "simulation_tracking",
+        "token_type": actual_type,
+    })
+    event = record_simulation_event(
+        conn,
+        token["campaign_id"],
+        event_type,
+        target_id=token["target_id"],
+        channel=token["channel"],
+        occurred_at=now,
+        delivery_job_id=token.get("delivery_job_id"),
+        delivery_attempt_id=attempt.get("id"),
+        tracking_token_id=token["id"],
+        provider_reference_id=attempt.get("provider_id"),
+        provider=attempt.get("provider"),
+        provider_event_id=attempt.get("provider_message_id"),
+        metadata=event_metadata,
+    )
+    return {
+        "token": get_tracking_token(conn, token["id"]),
+        "event": event,
+    }
+
+
 def get_delivery_job(conn, job_id):
     row = _row_to_dict(conn.execute("SELECT * FROM simulation_delivery_jobs WHERE id = ?", (job_id,)))
     return _delivery_job_response(row)
@@ -1827,6 +1915,124 @@ def get_delivery_provider_settings(conn, provider_id):
         )
     )
     return _delivery_provider_response(provider) if provider else None
+
+
+def get_delivery_provider_by_key(conn, channel, provider_key):
+    normalized_channel = (_normalize_text(channel) or "").lower()
+    if normalized_channel not in VALID_SIMULATION_CHANNELS:
+        raise ValueError("Delivery provider channel must be one of: {}".format(", ".join(sorted(VALID_SIMULATION_CHANNELS))))
+    provider = _row_to_dict(
+        conn.execute(
+            """
+            SELECT
+                id,
+                channel,
+                provider_key,
+                provider_name,
+                provider_type,
+                enabled,
+                settings_json,
+                required_settings_json,
+                secret_placeholder,
+                last_error_message,
+                created_at,
+                updated_at
+            FROM simulation_channel_providers
+            WHERE channel = ? AND provider_key = ?
+            """,
+            (normalized_channel, _normalize_text(provider_key)),
+        )
+    )
+    return _delivery_provider_response(provider) if provider else None
+
+
+def record_provider_webhook_event(conn, channel, provider_key, payload):
+    """Record a future provider webhook event without requiring provider credentials."""
+    provider = get_delivery_provider_by_key(conn, channel, provider_key)
+    if not provider:
+        raise ValueError("Unknown simulation delivery provider: {}/{}".format(channel, provider_key))
+
+    payload = payload or {}
+    token_value = _normalize_text(payload.get("tracking_token") or payload.get("token"))
+    token = get_tracking_token_by_value(conn, token_value) if token_value else None
+    event_type = _normalize_text(
+        payload.get("event_type") or payload.get("event") or payload.get("type")
+    )
+    if not event_type and token:
+        event_type = _tracking_event_type(token["token_type"])
+    if not event_type:
+        raise ValueError("Webhook payload must include an event_type or tracking token.")
+
+    campaign_id = payload.get("campaign_id") or (token or {}).get("campaign_id")
+    target_id = payload.get("target_id") or (token or {}).get("target_id")
+    delivery_job_id = payload.get("delivery_job_id") or (token or {}).get("delivery_job_id")
+    tracking_token_id = (token or {}).get("id")
+    attempt = None
+    provider_message_id = _normalize_text(
+        payload.get("provider_event_id") or payload.get("provider_message_id") or payload.get("message_id")
+    )
+    if provider_message_id:
+        attempt = _row_to_dict(
+            conn.execute(
+                """
+                SELECT id, delivery_job_id, campaign_id, target_id, channel
+                FROM simulation_delivery_attempts
+                WHERE provider_message_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (provider_message_id,),
+            )
+        )
+    if not attempt and token:
+        attempt = _tracking_attempt(conn, token)
+    if attempt:
+        campaign_id = campaign_id or attempt.get("campaign_id")
+        target_id = target_id or attempt.get("target_id")
+        delivery_job_id = delivery_job_id or attempt.get("delivery_job_id")
+
+    if tracking_token_id:
+        now = _utc_now()
+        conn.execute(
+            """
+            UPDATE simulation_tracking_tokens
+            SET first_seen_at = COALESCE(first_seen_at, ?),
+                last_seen_at = ?,
+                event_count = event_count + 1,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (now, now, now, tracking_token_id),
+        )
+
+    metadata = dict(payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {})
+    metadata.update({
+        "source": "provider_webhook",
+        "provider_key": provider["provider_key"],
+        "raw_event_type": event_type,
+    })
+    event = record_simulation_event(
+        conn,
+        int(campaign_id),
+        event_type,
+        target_id=int(target_id) if target_id is not None else None,
+        channel=provider["channel"],
+        delivery_status=payload.get("delivery_status"),
+        delivery_job_id=int(delivery_job_id) if delivery_job_id is not None else None,
+        delivery_attempt_id=(attempt or {}).get("id"),
+        tracking_token_id=tracking_token_id,
+        provider_reference_id=provider["id"],
+        provider=provider["provider_key"],
+        provider_event_id=provider_message_id,
+        error_message=payload.get("error_message"),
+        retry_count=int(payload.get("retry_count") or 0),
+        metadata=metadata,
+    )
+    return {
+        "provider": provider,
+        "event": event,
+        "tracking_token": get_tracking_token(conn, tracking_token_id) if tracking_token_id else None,
+    }
 
 
 def update_delivery_provider_settings(
