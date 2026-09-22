@@ -22,6 +22,11 @@ class SimulationMigrationTest(unittest.TestCase):
                 "simulation_import_batches",
                 "simulation_targets",
                 "simulation_events",
+                "simulation_channel_providers",
+                "simulation_delivery_jobs",
+                "simulation_delivery_attempts",
+                "simulation_message_artifacts",
+                "simulation_tracking_tokens",
                 "ai_provider_configs",
                 "ai_generation_audits",
             }
@@ -79,6 +84,113 @@ class SimulationMigrationTest(unittest.TestCase):
                 "SELECT COUNT(*) FROM simulation_events"
             ).fetchone()[0]
             self.assertGreaterEqual(event_count, 9)
+
+            delivery_providers = {
+                row[0]: row[1]
+                for row in cur.execute(
+                    """
+                    SELECT provider_key, enabled
+                    FROM simulation_channel_providers
+                    """
+                )
+            }
+            self.assertEqual(
+                delivery_providers,
+                {
+                    "dry_run_email": 1,
+                    "dry_run_sms": 1,
+                    "dry_run_voice": 1,
+                    "email_api": 0,
+                    "sms_api": 0,
+                    "smtp_email": 0,
+                    "voice_api": 0,
+                },
+            )
+
+            delivery_job_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(simulation_delivery_jobs)")
+            }
+            self.assertTrue(
+                {
+                    "campaign_id",
+                    "status",
+                    "mode",
+                    "provider_snapshot",
+                    "queued_count",
+                    "sent_count",
+                    "delivered_count",
+                    "failed_count",
+                    "retry_count",
+                    "error_message",
+                    "queued_at",
+                    "started_at",
+                    "completed_at",
+                }.issubset(delivery_job_columns)
+            )
+
+            delivery_attempt_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(simulation_delivery_attempts)")
+            }
+            self.assertTrue(
+                {
+                    "delivery_job_id",
+                    "campaign_id",
+                    "target_id",
+                    "message_artifact_id",
+                    "provider_id",
+                    "channel",
+                    "status",
+                    "provider",
+                    "provider_message_id",
+                    "provider_response",
+                    "error_message",
+                    "retry_count",
+                    "queued_at",
+                    "sent_at",
+                    "delivered_at",
+                    "failed_at",
+                    "next_retry_at",
+                }.issubset(delivery_attempt_columns)
+            )
+
+            tracking_token_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(simulation_tracking_tokens)")
+            }
+            self.assertTrue(
+                {
+                    "campaign_id",
+                    "target_id",
+                    "delivery_job_id",
+                    "message_artifact_id",
+                    "channel",
+                    "token",
+                    "token_type",
+                    "destination_url",
+                    "first_seen_at",
+                    "last_seen_at",
+                    "event_count",
+                }.issubset(tracking_token_columns)
+            )
+
+            event_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(simulation_events)")
+            }
+            self.assertTrue(
+                {
+                    "delivery_job_id",
+                    "delivery_attempt_id",
+                    "tracking_token_id",
+                    "provider_reference_id",
+                    "provider",
+                    "provider_event_id",
+                    "error_message",
+                    "retry_count",
+                }.issubset(event_columns)
+            )
 
             conn.close()
 
@@ -193,6 +305,57 @@ class SimulationMigrationTest(unittest.TestCase):
                     "completed_at",
                 }.issubset(import_batch_columns)
             )
+            conn.close()
+
+    def test_delivery_columns_are_added_to_existing_simulation_events(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "socialfish-test.db")
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE simulation_events (
+                    id INTEGER PRIMARY KEY,
+                    campaign_id INTEGER NOT NULL,
+                    target_id INTEGER,
+                    channel TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    delivery_status TEXT,
+                    occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    metadata TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            migrate_db(db_path)
+            migrate_db(db_path)
+
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            event_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(simulation_events)")
+            }
+            self.assertTrue(
+                {
+                    "delivery_job_id",
+                    "delivery_attempt_id",
+                    "tracking_token_id",
+                    "provider_reference_id",
+                    "provider",
+                    "provider_event_id",
+                    "error_message",
+                    "retry_count",
+                }.issubset(event_columns)
+            )
+
+            provider_count = cur.execute(
+                "SELECT COUNT(*) FROM simulation_channel_providers"
+            ).fetchone()[0]
+            self.assertEqual(provider_count, 7)
             conn.close()
 
 

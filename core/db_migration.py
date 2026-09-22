@@ -222,6 +222,42 @@ def _seed_simulation_demo(cur):
             ),
         )
 
+
+def _seed_simulation_channel_providers(cur):
+    """Seed safe provider references for delivery orchestration."""
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    provider_rows = [
+        ("email", "dry_run_email", "Dry-run Email", "dry_run", 1, "[]"),
+        ("sms", "dry_run_sms", "Dry-run SMS", "dry_run", 1, "[]"),
+        ("voice", "dry_run_voice", "Dry-run Voice", "dry_run", 1, "[]"),
+        ("email", "smtp_email", "SMTP Email", "smtp", 0, '["smtp_host","smtp_port","from_email"]'),
+        ("email", "email_api", "Email API", "email_api", 0, '["api_key","from_email"]'),
+        ("sms", "sms_api", "SMS API", "sms_api", 0, '["api_key","sender_id"]'),
+        ("voice", "voice_api", "Voice API", "voice_api", 0, '["api_key","caller_id"]'),
+    ]
+    for channel, key, name, provider_type, enabled, required_settings in provider_rows:
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO simulation_channel_providers (
+                channel, provider_key, provider_name, provider_type, enabled,
+                settings_json, required_settings_json, secret_placeholder,
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, '{}', ?, 'not-configured', ?, ?)
+            """,
+            (
+                channel,
+                key,
+                name,
+                provider_type,
+                enabled,
+                required_settings,
+                now,
+                now,
+            ),
+        )
+
+
 def migrate_db(database_path):
     """Initialize or migrate database to latest schema"""
     
@@ -654,10 +690,228 @@ def migrate_db(database_path):
         "channel": "TEXT NOT NULL DEFAULT 'email'",
         "event_type": "TEXT",
         "delivery_status": "TEXT",
+        "delivery_job_id": "INTEGER",
+        "delivery_attempt_id": "INTEGER",
+        "tracking_token_id": "INTEGER",
+        "provider_reference_id": "INTEGER",
+        "provider": "TEXT",
+        "provider_event_id": "TEXT",
+        "error_message": "TEXT",
+        "retry_count": "INTEGER NOT NULL DEFAULT 0",
         "occurred_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         "metadata": "TEXT",
         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     })
+
+    # ============= SIMULATION DELIVERY ORCHESTRATION (Phase 04) =============
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS simulation_channel_providers (
+            id INTEGER PRIMARY KEY,
+            channel TEXT NOT NULL,
+            provider_key TEXT NOT NULL,
+            provider_name TEXT NOT NULL,
+            provider_type TEXT NOT NULL DEFAULT 'dry_run',
+            enabled BOOLEAN NOT NULL DEFAULT 0,
+            settings_json TEXT,
+            required_settings_json TEXT,
+            secret_placeholder TEXT,
+            last_error_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(channel, provider_key)
+        )
+    """)
+    _ensure_columns(cur, "simulation_channel_providers", {
+        "channel": "TEXT NOT NULL DEFAULT 'email'",
+        "provider_key": "TEXT",
+        "provider_name": "TEXT",
+        "provider_type": "TEXT NOT NULL DEFAULT 'dry_run'",
+        "enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "settings_json": "TEXT",
+        "required_settings_json": "TEXT",
+        "secret_placeholder": "TEXT",
+        "last_error_message": "TEXT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS simulation_delivery_jobs (
+            id INTEGER PRIMARY KEY,
+            campaign_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            mode TEXT NOT NULL DEFAULT 'dry_run',
+            requested_by TEXT,
+            provider_snapshot TEXT,
+            total_targets INTEGER NOT NULL DEFAULT 0,
+            total_attempts INTEGER NOT NULL DEFAULT 0,
+            queued_count INTEGER NOT NULL DEFAULT 0,
+            sent_count INTEGER NOT NULL DEFAULT 0,
+            delivered_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT,
+            queued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (campaign_id) REFERENCES simulation_campaigns(id)
+        )
+    """)
+    _ensure_columns(cur, "simulation_delivery_jobs", {
+        "campaign_id": "INTEGER",
+        "status": "TEXT NOT NULL DEFAULT 'queued'",
+        "mode": "TEXT NOT NULL DEFAULT 'dry_run'",
+        "requested_by": "TEXT",
+        "provider_snapshot": "TEXT",
+        "total_targets": "INTEGER NOT NULL DEFAULT 0",
+        "total_attempts": "INTEGER NOT NULL DEFAULT 0",
+        "queued_count": "INTEGER NOT NULL DEFAULT 0",
+        "sent_count": "INTEGER NOT NULL DEFAULT 0",
+        "delivered_count": "INTEGER NOT NULL DEFAULT 0",
+        "failed_count": "INTEGER NOT NULL DEFAULT 0",
+        "retry_count": "INTEGER NOT NULL DEFAULT 0",
+        "error_message": "TEXT",
+        "queued_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "started_at": "TIMESTAMP",
+        "completed_at": "TIMESTAMP",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS simulation_message_artifacts (
+            id INTEGER PRIMARY KEY,
+            campaign_id INTEGER NOT NULL,
+            delivery_job_id INTEGER,
+            channel TEXT NOT NULL,
+            artifact_type TEXT NOT NULL,
+            subject TEXT,
+            body TEXT,
+            content_json TEXT,
+            content_hash TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (campaign_id) REFERENCES simulation_campaigns(id),
+            FOREIGN KEY (delivery_job_id) REFERENCES simulation_delivery_jobs(id)
+        )
+    """)
+    _ensure_columns(cur, "simulation_message_artifacts", {
+        "campaign_id": "INTEGER",
+        "delivery_job_id": "INTEGER",
+        "channel": "TEXT NOT NULL DEFAULT 'email'",
+        "artifact_type": "TEXT NOT NULL DEFAULT 'message'",
+        "subject": "TEXT",
+        "body": "TEXT",
+        "content_json": "TEXT",
+        "content_hash": "TEXT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS simulation_tracking_tokens (
+            id INTEGER PRIMARY KEY,
+            campaign_id INTEGER NOT NULL,
+            target_id INTEGER NOT NULL,
+            delivery_job_id INTEGER,
+            message_artifact_id INTEGER,
+            channel TEXT NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            token_type TEXT NOT NULL,
+            destination_url TEXT,
+            expires_at TIMESTAMP,
+            first_seen_at TIMESTAMP,
+            last_seen_at TIMESTAMP,
+            event_count INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (campaign_id) REFERENCES simulation_campaigns(id),
+            FOREIGN KEY (target_id) REFERENCES simulation_targets(id),
+            FOREIGN KEY (delivery_job_id) REFERENCES simulation_delivery_jobs(id),
+            FOREIGN KEY (message_artifact_id) REFERENCES simulation_message_artifacts(id)
+        )
+    """)
+    _ensure_columns(cur, "simulation_tracking_tokens", {
+        "campaign_id": "INTEGER",
+        "target_id": "INTEGER",
+        "delivery_job_id": "INTEGER",
+        "message_artifact_id": "INTEGER",
+        "channel": "TEXT NOT NULL DEFAULT 'email'",
+        "token": "TEXT",
+        "token_type": "TEXT NOT NULL DEFAULT 'open'",
+        "destination_url": "TEXT",
+        "expires_at": "TIMESTAMP",
+        "first_seen_at": "TIMESTAMP",
+        "last_seen_at": "TIMESTAMP",
+        "event_count": "INTEGER NOT NULL DEFAULT 0",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS simulation_delivery_attempts (
+            id INTEGER PRIMARY KEY,
+            delivery_job_id INTEGER NOT NULL,
+            campaign_id INTEGER NOT NULL,
+            target_id INTEGER NOT NULL,
+            message_artifact_id INTEGER,
+            provider_id INTEGER,
+            channel TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            provider TEXT,
+            provider_message_id TEXT,
+            provider_response TEXT,
+            error_message TEXT,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            max_retries INTEGER NOT NULL DEFAULT 0,
+            queued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            sent_at TIMESTAMP,
+            delivered_at TIMESTAMP,
+            failed_at TIMESTAMP,
+            next_retry_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (delivery_job_id) REFERENCES simulation_delivery_jobs(id),
+            FOREIGN KEY (campaign_id) REFERENCES simulation_campaigns(id),
+            FOREIGN KEY (target_id) REFERENCES simulation_targets(id),
+            FOREIGN KEY (message_artifact_id) REFERENCES simulation_message_artifacts(id),
+            FOREIGN KEY (provider_id) REFERENCES simulation_channel_providers(id),
+            UNIQUE(delivery_job_id, target_id, channel)
+        )
+    """)
+    _ensure_columns(cur, "simulation_delivery_attempts", {
+        "delivery_job_id": "INTEGER",
+        "campaign_id": "INTEGER",
+        "target_id": "INTEGER",
+        "message_artifact_id": "INTEGER",
+        "provider_id": "INTEGER",
+        "channel": "TEXT NOT NULL DEFAULT 'email'",
+        "status": "TEXT NOT NULL DEFAULT 'queued'",
+        "provider": "TEXT",
+        "provider_message_id": "TEXT",
+        "provider_response": "TEXT",
+        "error_message": "TEXT",
+        "retry_count": "INTEGER NOT NULL DEFAULT 0",
+        "max_retries": "INTEGER NOT NULL DEFAULT 0",
+        "queued_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "sent_at": "TIMESTAMP",
+        "delivered_at": "TIMESTAMP",
+        "failed_at": "TIMESTAMP",
+        "next_retry_at": "TIMESTAMP",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_delivery_jobs_campaign ON simulation_delivery_jobs(campaign_id, status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_delivery_attempts_job ON simulation_delivery_attempts(delivery_job_id, status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_delivery_attempts_target ON simulation_delivery_attempts(target_id, channel, status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracking_tokens_token ON simulation_tracking_tokens(token)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracking_tokens_target ON simulation_tracking_tokens(target_id, token_type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_message_artifacts_job ON simulation_message_artifacts(delivery_job_id, channel)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_simulation_events_delivery_job ON simulation_events(delivery_job_id, delivery_attempt_id)")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS ai_provider_configs (
@@ -767,6 +1021,7 @@ def migrate_db(database_path):
         "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     })
 
+    _seed_simulation_channel_providers(cur)
     _seed_simulation_demo(cur)
     
     conn.commit()

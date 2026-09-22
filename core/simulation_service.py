@@ -21,10 +21,25 @@ TARGET_CSV_COLUMNS = {
 
 
 VALID_SIMULATION_EVENTS = {
+    "queued": {
+        "target_column": "delivery_status",
+        "timestamp_column": None,
+        "status": "queued",
+    },
+    "sent": {
+        "target_column": "delivery_status",
+        "timestamp_column": None,
+        "status": "sent",
+    },
     "delivered": {
         "target_column": "delivery_status",
         "timestamp_column": "delivered_at",
         "status": "delivered",
+    },
+    "failed": {
+        "target_column": "delivery_status",
+        "timestamp_column": None,
+        "status": "failed",
     },
     "open": {
         "target_column": "opened",
@@ -65,6 +80,9 @@ VALID_SIMULATION_EVENTS = {
     "attachment_opened": {
         "target_column": "attachment_opened",
         "timestamp_column": "attachment_opened_at",
+    },
+    "voice_response": {
+        "status": "responded",
     },
 }
 
@@ -1086,16 +1104,17 @@ def record_simulation_event(
     event_id = cursor.lastrowid
 
     if target_id is not None:
-        assignments = [
-            "{} = ?".format(event_config["timestamp_column"]),
-            "updated_at = ?",
-        ]
-        values = [timestamp, timestamp]
-        target_column = event_config["target_column"]
+        assignments = ["updated_at = ?"]
+        values = [timestamp]
+        timestamp_column = event_config.get("timestamp_column")
+        if timestamp_column:
+            assignments.insert(0, "{} = ?".format(timestamp_column))
+            values.insert(0, timestamp)
+        target_column = event_config.get("target_column")
         if target_column == "delivery_status":
             assignments.insert(0, "delivery_status = ?")
             values.insert(0, event_status or "delivered")
-        else:
+        elif target_column:
             assignments.insert(0, "{} = 1".format(target_column))
 
         values.extend([target_id, campaign_id])

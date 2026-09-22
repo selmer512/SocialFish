@@ -268,6 +268,55 @@ Broken Voice,,,voice,Support,Morgan
         self.assertEqual(target[0], 1)
         self.assertIsNotNone(target[1])
 
+    def test_records_delivery_orchestration_event_types(self):
+        target_id = self.conn.execute(
+            """
+            SELECT id
+            FROM simulation_targets
+            WHERE campaign_id = ? AND channel = 'email'
+            LIMIT 1
+            """,
+            (self.campaign_id,),
+        ).fetchone()[0]
+
+        queued = record_simulation_event(
+            self.conn,
+            self.campaign_id,
+            "queued",
+            target_id=target_id,
+            metadata={"delivery_job_id": 1},
+        )
+        failed = record_simulation_event(
+            self.conn,
+            self.campaign_id,
+            "failed",
+            target_id=target_id,
+            delivery_status="failed",
+            metadata={"error_message": "provider unavailable", "retry_count": 2},
+        )
+        voice = record_simulation_event(
+            self.conn,
+            self.campaign_id,
+            "voice_response",
+            channel="voice",
+            metadata={"response": "completed_training"},
+        )
+
+        self.assertEqual(queued["delivery_status"], "queued")
+        self.assertEqual(failed["delivery_status"], "failed")
+        self.assertEqual(voice["event_type"], "voice_response")
+        self.assertIn("completed_training", voice["metadata"])
+
+        delivery_status = self.conn.execute(
+            """
+            SELECT delivery_status
+            FROM simulation_targets
+            WHERE id = ?
+            """,
+            (target_id,),
+        ).fetchone()[0]
+        self.assertEqual(delivery_status, "failed")
+
     def test_campaign_detail_includes_ai_draft_history(self):
         provider = next(
             provider

@@ -13,11 +13,18 @@ This phase adds simulation delivery orchestration and event tracking for email, 
   - Campaign services in `core/simulation_service.py` already normalize `email`, `sms`, and `voice` channels, manage campaigns/targets/import batches, preserve archived metrics, and expose AI draft history suitable as message source content.
   - Event tables already include `simulation_events` plus rollup fields on `simulation_targets` for delivered/opened/forwarded/deleted/link-clicked/attachment-opened. Missing delivery orchestration tables include jobs, attempts, message artifacts, tracking tokens, provider references, retry state, and voice response taxonomy.
 
-- [ ] Extend the data model for delivery orchestration:
+- [x] Extend the data model for delivery orchestration:
   - Add delivery jobs, delivery attempts, message artifacts, tracking tokens, and channel provider references
   - Track queued, sent, delivered, failed, opened, forwarded, deleted, link clicked, attachment opened, and voice response events
   - Record target, campaign, channel, provider, timestamps, error messages, and retry counts
   - Keep all migrations idempotent and preserve existing data
+
+  Completed 2026-09-22:
+  - Added idempotent migration coverage for `simulation_delivery_jobs`, `simulation_delivery_attempts`, `simulation_message_artifacts`, `simulation_tracking_tokens`, and `simulation_channel_providers`.
+  - Extended `simulation_events` with delivery job, attempt, tracking token, provider reference, provider event, error, and retry metadata columns.
+  - Seeded safe channel provider references for dry-run email/SMS/voice plus disabled real-provider placeholders.
+  - Extended service event taxonomy for queued, sent, failed, and voice response events without enabling external delivery.
+  - Verified with `python -m unittest discover tests`.
 
 - [ ] Implement delivery provider adapters:
   - Add a dry-run email adapter that records send attempts without sending external email
