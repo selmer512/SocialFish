@@ -57,7 +57,9 @@ This phase adds an implementation-neutral AI layer for creating authorized train
   - Test risk flag persistence and draft history
   - Test that secrets are never returned by generation or settings APIs
 
-- [ ] Run AI generation verification:
+- [x] Run AI generation verification:
   - Run all new AI tests
   - Use automated HTTP requests to render `/simulations/ai-builder`, generate local mock content, save a draft to a campaign, and reload the campaign detail page
   - Fix any route, template, service, or schema failures discovered during verification
+  - Verified focused AI coverage with `python -m unittest tests.test_ai_generation_contract tests.test_simulation_routes tests.test_simulation_service`.
+  - Verified the authenticated localhost HTTP flow for AI Builder render, local mock generation, draft save, and campaign detail reload; all returned 200.
