@@ -102,6 +102,9 @@
                         <h3 class="title-5 m-b-35">AI Scenario Builder</h3>
                     </div>
                     <div class="col-md-4" style="text-align: right;">
+                        <a id="campaign-detail-link" class="btn btn-outline-secondary btn-sm" href="/simulations/campaigns">
+                            <i class="fas fa-bullhorn"></i>&nbsp; Campaign
+                        </a>
                         <a class="btn btn-outline-secondary btn-sm" href="/ai-settings">
                             <i class="fas fa-cog"></i>&nbsp; AI Settings
                         </a>
@@ -114,7 +117,7 @@
                             <div class="col-12 col-md-8">
                                 <select id="campaign-id" name="campaign_id" class="form-control" required>
                                     {% for campaign in campaigns %}
-                                    <option value="{{ campaign.id }}">{{ campaign.name }}</option>
+                                    <option value="{{ campaign.id }}" {% if request.args.get("campaign_id") == campaign.id|string %}selected{% endif %}>{{ campaign.name }}</option>
                                     {% endfor %}
                                 </select>
                             </div>
@@ -281,6 +284,11 @@
                 );
             }
 
+            function updateCampaignLink() {
+                var campaignId = $("#campaign-id").val();
+                $("#campaign-detail-link").attr("href", campaignId ? "/simulations/campaigns/" + campaignId : "/simulations/campaigns");
+            }
+
             function fieldText(draft, field, fallback) {
                 return draft && draft[field] ? draft[field] : fallback;
             }
@@ -400,6 +408,9 @@
                     $("#save-draft-button").prop("disabled", false).html('<i class="fas fa-save"></i> Save Selected Drafts');
                 });
             });
+
+            $("#campaign-id").on("change", updateCampaignLink);
+            updateCampaignLink();
         })();
     </script>
 </body>

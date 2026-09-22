@@ -178,6 +178,33 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn("Authorized training simulation", row[3])
         self.assertIn("authorized security awareness training simulation", row[4].lower())
 
+        second_save_response = self.client.post(
+            "/api/simulations/ai/save-draft",
+            json={
+                "campaign_id": campaign_id,
+                "provider": payload["generation"]["provider"],
+                "channels": ["sms"],
+                "draft": {
+                    "sms_body": "Authorized training simulation SMS follow-up.",
+                    "training_text": "Report suspicious invoice requests through approved channels.",
+                },
+                "risk_flags": ["authorized_training_label_present"],
+                "safety_notes": ["Saved as a second channel-specific draft version."],
+                "metadata": payload["generation"]["metadata"],
+            },
+        )
+        self.assertEqual(second_save_response.status_code, 200)
+
+        detail_response = self.client.get("/simulations/campaigns/{}".format(campaign_id))
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertIn(b"AI Draft History", detail_response.data)
+        self.assertIn(b"Channel-Specific Content", detail_response.data)
+        self.assertIn(b"Version #", detail_response.data)
+        self.assertIn(b"Practice reporting suspicious invoice requests", detail_response.data)
+        self.assertIn(b"Authorized training simulation SMS follow-up.", detail_response.data)
+        self.assertIn(b"/simulations/ai-builder?campaign_id=", detail_response.data)
+        self.assertIn(b"/ai-settings", detail_response.data)
+
     def test_ai_generation_api_returns_structured_errors(self):
         missing_provider = self.client.post(
             "/api/simulations/ai/generate",
@@ -340,6 +367,10 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Targets", detail_response.data)
         self.assertIn(b"Events", detail_response.data)
         self.assertIn(b"Archive", detail_response.data)
+        self.assertIn(b"AI Draft History", detail_response.data)
+        self.assertIn(b"No AI drafts have been saved for this campaign yet.", detail_response.data)
+        self.assertIn(b"/simulations/ai-builder?campaign_id=", detail_response.data)
+        self.assertIn(b"/ai-settings", detail_response.data)
 
         update_response = self.client.post(
             "/simulations/campaigns/{}".format(campaign_id),

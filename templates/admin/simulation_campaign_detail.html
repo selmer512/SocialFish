@@ -29,7 +29,13 @@
                 <div class="row">
                     <div class="col-md-8"><h3 class="title-5 m-b-35">{{ campaign.name }}</h3></div>
                     <div class="col-md-4" style="text-align: right;">
-                        <form action="/simulations/campaigns/{{ campaign.id }}/archive" method="POST">
+                        <a class="btn btn-success btn-sm" href="/simulations/ai-builder?campaign_id={{ campaign.id }}">
+                            <i class="fas fa-magic"></i>&nbsp; AI Builder
+                        </a>
+                        <a class="btn btn-outline-secondary btn-sm" href="/ai-settings">
+                            <i class="fas fa-cog"></i>&nbsp; AI Settings
+                        </a>
+                        <form action="/simulations/campaigns/{{ campaign.id }}/archive" method="POST" style="display: inline-block; margin-left: 4px;">
                             <button type="submit" class="btn btn-danger btn-sm">
                                 <i class="fas fa-archive"></i>&nbsp; Archive
                             </button>
@@ -52,6 +58,94 @@
                         <small class="form-text text-muted">Training URL: {{ campaign.training_url or "Not configured" }}</small>
                     </div>
                 </div>
+                <hr>
+                <h4 class="mb-3">AI Draft History</h4>
+                <div class="mb-3" style="text-align: right;">
+                    <a class="btn btn-success btn-sm" href="/simulations/ai-builder?campaign_id={{ campaign.id }}">
+                        <i class="fas fa-plus"></i> Generate Channel Drafts
+                    </a>
+                    <a class="btn btn-outline-secondary btn-sm" href="/ai-settings">
+                        <i class="fas fa-cog"></i> AI Provider Settings
+                    </a>
+                </div>
+                {% if ai_drafts %}
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr><th>Saved</th><th>Provider</th><th>Channels</th><th>Channel-Specific Content</th><th>Review Signals</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for draft in ai_drafts %}
+                            <tr class="tr-shadow">
+                                <td>
+                                    {{ draft.created_at }}
+                                    <br>
+                                    <small class="form-text text-muted">Version #{{ draft.id }} / {{ draft.status }}</small>
+                                </td>
+                                <td>
+                                    {{ draft.provider_name or "Unknown provider" }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ draft.provider_type or "provider" }}{% if draft.model_name %} / {{ draft.model_name }}{% endif %}</small>
+                                </td>
+                                <td>
+                                    {% for channel in draft.channels %}
+                                    <span class="badge badge-secondary">{{ channel|upper }}</span>
+                                    {% else %}
+                                    <span class="badge badge-secondary">No channels</span>
+                                    {% endfor %}
+                                </td>
+                                <td>
+                                    {% if "email" in draft.channels %}
+                                    <strong><i class="fas fa-envelope"></i> Email</strong>
+                                    <div><strong>Subject:</strong> {{ draft.email_subject or "No subject saved" }}</div>
+                                    <div>{{ draft.email_body or "No email body saved" }}</div>
+                                    {% endif %}
+                                    {% if "sms" in draft.channels %}
+                                    <div class="mt-2"><strong><i class="fas fa-sms"></i> SMS</strong></div>
+                                    <div>{{ draft.sms_body or "No SMS body saved" }}</div>
+                                    {% endif %}
+                                    {% if "voice" in draft.channels %}
+                                    <div class="mt-2"><strong><i class="fas fa-phone"></i> Voice</strong></div>
+                                    <div>{{ draft.voice_script or "No voice script saved" }}</div>
+                                    {% endif %}
+                                    {% if draft.landing_text %}
+                                    <div class="mt-2"><strong>Landing:</strong> {{ draft.landing_text }}</div>
+                                    {% endif %}
+                                    {% if draft.training_text %}
+                                    <div class="mt-2"><strong>Training:</strong> {{ draft.training_text }}</div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <strong>Risk flags</strong>
+                                    <div>
+                                        {% for flag in draft.risk_flags %}
+                                        <span class="badge badge-warning">{{ flag }}</span>
+                                        {% else %}
+                                        <span class="badge badge-secondary">No risk flags</span>
+                                        {% endfor %}
+                                    </div>
+                                    <strong class="d-block mt-2">Safety notes</strong>
+                                    <ul class="mb-0">
+                                        {% for note in draft.safety_notes %}
+                                        <li>{{ note }}</li>
+                                        {% else %}
+                                        <li>No safety notes saved.</li>
+                                        {% endfor %}
+                                    </ul>
+                                </td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="alert alert-secondary" role="alert">
+                    No AI drafts have been saved for this campaign yet.
+                    <a href="/simulations/ai-builder?campaign_id={{ campaign.id }}">Generate drafts in AI Builder</a>
+                    after confirming provider settings in <a href="/ai-settings">AI Settings</a>.
+                </div>
+                {% endif %}
                 <hr>
                 <h4 class="mb-3">Edit Campaign</h4>
                 <form action="/simulations/campaigns/{{ campaign.id }}" method="POST" class="form-horizontal">

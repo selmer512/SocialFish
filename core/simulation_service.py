@@ -576,6 +576,7 @@ def get_campaign_detail(conn, campaign_id, include_archived_targets=True):
         "metrics": get_campaign_metrics(conn, campaign_id),
         "import_batches": list_import_batches(conn, campaign_id),
         "events": list_simulation_events(conn, campaign_id),
+        "ai_drafts": list_ai_campaign_drafts(conn, campaign_id),
     }
 
 

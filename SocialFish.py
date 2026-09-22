@@ -535,6 +535,7 @@ def simulation_campaign_detail(campaign_id):
         events=detail["events"],
         metrics=detail["metrics"],
         import_batches=detail["import_batches"],
+        ai_drafts=detail["ai_drafts"],
         statuses=("draft", "active", "paused", "completed"),
         channels=("email", "sms", "voice"),
         target_csv_required_columns=TARGET_CSV_REQUIRED_COLUMNS,

@@ -39,11 +39,12 @@ This phase adds an implementation-neutral AI layer for creating authorized train
   - Show risk flags and safety notes next to generated drafts
   - Provide a save-to-campaign action that stores selected drafts without requiring CLI configuration
 
-- [ ] Integrate generated drafts with campaign detail pages:
+- [x] Integrate generated drafts with campaign detail pages:
   - Show saved AI drafts on the campaign detail page
   - Allow a campaign to have channel-specific content versions
   - Preserve draft history instead of overwriting prior generated content
   - Add UI links between campaign detail, AI Builder, and AI Settings
+  - Completed by adding AI draft history to campaign detail data, rendering channel-specific saved versions with timestamps and review signals, deep-linking AI Builder to campaign details, and covering draft history in service and route tests.
 
 - [ ] Add structured feature documentation while implementing the UI:
   - Create `docs/features/ai-scenario-generation.md` with YAML front matter using type `reference`, tags for `ai`, `simulations`, and `training`

@@ -21,6 +21,7 @@ from core.simulation_service import (
     list_targets,
     parse_target_csv,
     record_simulation_event,
+    save_ai_campaign_draft,
     update_campaign,
     update_ai_provider_settings,
     update_target,
@@ -266,6 +267,44 @@ Broken Voice,,,voice,Support,Morgan
         ).fetchone()
         self.assertEqual(target[0], 1)
         self.assertIsNotNone(target[1])
+
+    def test_campaign_detail_includes_ai_draft_history(self):
+        provider = next(
+            provider
+            for provider in list_ai_provider_settings(self.conn)
+            if provider["provider_type"] == "local"
+        )
+        first = save_ai_campaign_draft(
+            self.conn,
+            self.campaign_id,
+            {
+                "email_subject": "Training simulation: invoice review",
+                "email_body": "Authorized training simulation email draft.",
+                "training_text": "Report suspicious invoice messages.",
+            },
+            ["email"],
+            provider=provider,
+            risk_flags=["authorized_training_label_present"],
+            safety_notes=["Credential collection language was excluded."],
+        )
+        second = save_ai_campaign_draft(
+            self.conn,
+            self.campaign_id,
+            {
+                "sms_body": "Authorized training simulation SMS draft.",
+                "voice_script": "Authorized security awareness training simulation voice script.",
+            },
+            ["sms", "voice"],
+            provider=provider,
+            risk_flags=["authorized_training_label_present"],
+        )
+
+        detail = get_campaign_detail(self.conn, self.campaign_id)
+
+        self.assertEqual([draft["id"] for draft in detail["ai_drafts"]], [second["id"], first["id"]])
+        self.assertEqual(detail["ai_drafts"][0]["channels"], ["sms", "voice"])
+        self.assertIn("Authorized training simulation", detail["ai_drafts"][0]["sms_body"])
+        self.assertEqual(detail["ai_drafts"][1]["email_subject"], "Training simulation: invoice review")
 
     def test_rejects_unknown_event_types(self):
         with self.assertRaises(ValueError):
