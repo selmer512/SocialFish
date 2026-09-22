@@ -46,7 +46,7 @@ This phase adds an implementation-neutral AI layer for creating authorized train
   - Add UI links between campaign detail, AI Builder, and AI Settings
   - Completed by adding AI draft history to campaign detail data, rendering channel-specific saved versions with timestamps and review signals, deep-linking AI Builder to campaign details, and covering draft history in service and route tests.
 
-- [ ] Add structured feature documentation while implementing the UI:
+- [x] Add structured feature documentation while implementing the UI:
   - Create `docs/features/ai-scenario-generation.md` with YAML front matter using type `reference`, tags for `ai`, `simulations`, and `training`
   - Include wiki-links to `[[Simulation-Campaigns]]`, `[[AI-Provider-Configuration]]`, and `[[Simulation-Metrics]]`
   - Document GUI configuration, supported provider shapes, safety guardrails, and local mock behavior
