@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>SocialFish AI Builder</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqiyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/simulations"><i class="fas fa-arrow-left"></i> <strong>SocialFish</strong></a>/AI Scenario Builder
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    <strong>Authorized internal training simulations only.</strong>
+                    Generate draft content for approved security awareness campaigns using UI-managed provider settings.
+                </div>
+                <div class="row">
+                    <div class="col-md-8">
+                        <h3 class="title-5 m-b-35">AI Scenario Builder</h3>
+                    </div>
+                    <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-outline-secondary btn-sm" href="/ai-settings">
+                            <i class="fas fa-cog"></i>&nbsp; AI Settings
+                        </a>
+                    </div>
+                </div>
+                <form action="/api/simulations/ai/generate" method="POST" class="form-horizontal">
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Campaign</label></div>
+                        <div class="col-12 col-md-9">
+                            <select name="campaign_id" class="form-control">
+                                {% for campaign in campaigns %}
+                                <option value="{{ campaign.id }}">{{ campaign.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Provider</label></div>
+                        <div class="col-12 col-md-9">
+                            <select name="provider_id" class="form-control">
+                                {% for provider in providers %}
+                                <option value="{{ provider.id }}" {% if not provider.enabled %}disabled{% endif %}>
+                                    {{ provider.name }}{% if not provider.enabled %} - disabled{% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <small class="form-text text-muted">Disabled providers cannot be used for generation.</small>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Audience</label></div>
+                        <div class="col-12 col-md-9"><input type="text" name="audience" class="form-control" placeholder="Finance team" required></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Scenario Objective</label></div>
+                        <div class="col-12 col-md-9"><textarea name="scenario_goal" rows="3" class="form-control" required></textarea></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Channels</label></div>
+                        <div class="col-12 col-md-9">
+                            {% for channel in channels %}
+                            <label class="checkbox-inline mr-3">
+                                <input type="checkbox" name="channels" value="{{ channel }}" {% if channel == "email" %}checked{% endif %}>
+                                {{ channel|upper }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Tone</label></div>
+                        <div class="col-12 col-md-4">
+                            <select name="tone" class="form-control">
+                                {% for tone in tones %}
+                                <option value="{{ tone }}">{{ tone|title }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col col-md-2"><label class="form-control-label">Difficulty</label></div>
+                        <div class="col-12 col-md-3">
+                            <select name="difficulty" class="form-control">
+                                {% for difficulty in difficulties %}
+                                <option value="{{ difficulty }}">{{ difficulty|title }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Training Reminder</label></div>
+                        <div class="col-12 col-md-9"><textarea name="training_reminder" rows="2" class="form-control"></textarea></div>
+                    </div>
+                    <div class="card-footer" style="text-align: right;">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="fas fa-magic"></i> Generate Drafts
+                        </button>
+                    </div>
+                </form>
+                <hr>
+                <h4 class="mb-3">API Save Endpoint</h4>
+                <p class="text-muted">
+                    Approved drafts can be saved with <code>POST /api/simulations/ai/save-draft</code> and remain linked to the selected campaign.
+                </p>
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>

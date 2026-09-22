@@ -59,11 +59,22 @@ class SimulationRoutesTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def _provider_id(self, provider_type="local"):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            return conn.execute(
+                "SELECT id FROM ai_provider_configs WHERE provider_type = ?",
+                (provider_type,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
     def test_authenticated_pages_render(self):
         simulations = self.client.get("/simulations")
         campaigns = self.client.get("/simulations/campaigns")
         new_campaign = self.client.get("/simulations/campaigns/new")
         ai_settings = self.client.get("/ai-settings")
+        ai_builder = self.client.get("/simulations/ai-builder")
 
         self.assertEqual(simulations.status_code, 200)
         self.assertIn(b"Authorized internal training simulations only", simulations.data)
@@ -89,6 +100,115 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Base URL", ai_settings.data)
         self.assertIn(b"Secret placeholder", ai_settings.data)
         self.assertIn(b"Save Provider", ai_settings.data)
+        self.assertEqual(ai_builder.status_code, 200)
+        self.assertIn(b"AI Scenario Builder", ai_builder.data)
+        self.assertIn(b"Authorized internal training simulations only", ai_builder.data)
+        self.assertIn(b"/api/simulations/ai/generate", ai_builder.data)
+
+    def test_ai_generation_api_generates_and_saves_campaign_draft(self):
+        campaign_id = self._campaign_id()
+        provider_id = self._provider_id("local")
+
+        generate_response = self.client.post(
+            "/api/simulations/ai/generate",
+            json={
+                "campaign_id": campaign_id,
+                "provider_id": provider_id,
+                "scenario_goal": "Practice reporting suspicious invoice requests",
+                "audience": "Finance team",
+                "channels": ["email", "sms", "voice"],
+                "tone": "calm",
+                "difficulty": "introductory",
+                "training_reminder": "Use the report button before taking action.",
+            },
+        )
+        payload = generate_response.get_json()
+
+        self.assertEqual(generate_response.status_code, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["generation"]["provider"]["id"], provider_id)
+        self.assertEqual(set(payload["generation"]["channels"]), {"email", "sms", "voice"})
+        self.assertIn("Training simulation", payload["generation"]["draft"]["email_subject"])
+        self.assertIn("authorized_security_awareness_training", str(payload))
+        self.assertNotIn("secret_placeholder", str(payload))
+
+        save_response = self.client.post(
+            "/api/simulations/ai/save-draft",
+            json={
+                "campaign_id": campaign_id,
+                "provider": payload["generation"]["provider"],
+                "channels": payload["generation"]["channels"],
+                "draft": payload["generation"]["draft"],
+                "risk_flags": payload["generation"]["risk_flags"],
+                "safety_notes": payload["generation"]["safety_notes"],
+                "metadata": payload["generation"]["metadata"],
+            },
+        )
+        saved = save_response.get_json()
+
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(saved["status"], "ok")
+        self.assertEqual(saved["draft"]["campaign_id"], campaign_id)
+        self.assertEqual(set(saved["draft"]["channels"]), {"email", "sms", "voice"})
+        self.assertIn("authorized_training_label_present", saved["draft"]["risk_flags"])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                """
+                SELECT campaign_id, provider_id, email_subject, sms_body, voice_script
+                FROM ai_campaign_drafts
+                WHERE id = ?
+                """,
+                (saved["draft"]["id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row[0], campaign_id)
+        self.assertEqual(row[1], provider_id)
+        self.assertIn("Practice reporting suspicious invoice requests", row[2])
+        self.assertIn("Authorized training simulation", row[3])
+        self.assertIn("authorized security awareness training simulation", row[4].lower())
+
+    def test_ai_generation_api_returns_structured_errors(self):
+        missing_provider = self.client.post(
+            "/api/simulations/ai/generate",
+            json={
+                "scenario_goal": "Practice safe reporting",
+                "audience": "Operations",
+                "channels": ["email"],
+            },
+        )
+        missing_payload = missing_provider.get_json()
+        self.assertEqual(missing_provider.status_code, 400)
+        self.assertEqual(missing_payload["error"]["type"], "missing_provider_configuration")
+
+        blocked = self.client.post(
+            "/api/simulations/ai/generate",
+            json={
+                "provider_id": self._provider_id("local"),
+                "scenario_goal": "Capture user credentials during the exercise",
+                "audience": "Finance",
+                "channels": ["email"],
+            },
+        )
+        blocked_payload = blocked.get_json()
+        self.assertEqual(blocked.status_code, 400)
+        self.assertEqual(blocked_payload["error"]["type"], "blocked_content")
+        self.assertIn("credential_harvesting_request", blocked_payload["error"]["risk_flags"])
+
+        disabled = self.client.post(
+            "/api/simulations/ai/generate",
+            json={
+                "provider_id": self._provider_id("cloud"),
+                "scenario_goal": "Practice safe reporting",
+                "audience": "Operations",
+                "channels": ["email"],
+            },
+        )
+        disabled_payload = disabled.get_json()
+        self.assertEqual(disabled.status_code, 400)
+        self.assertEqual(disabled_payload["error"]["type"], "missing_provider_configuration")
 
     def test_admin_dashboard_links_to_simulation_pages(self):
         response = self.client.get("/creds")

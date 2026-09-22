@@ -127,6 +127,17 @@ def _audit_response(row):
     return audit
 
 
+def _ai_draft_response(row):
+    if not row:
+        return None
+    draft = dict(row)
+    draft["channels"] = _json_list(draft.get("channels"))
+    draft["risk_flags"] = _json_list(draft.get("risk_flags"))
+    draft["safety_notes"] = _json_list(draft.get("safety_notes"))
+    draft["metadata"] = _json_dict(draft.get("metadata"))
+    return draft
+
+
 def _safe_json_dumps(value):
     return json.dumps(value or {}, sort_keys=True)
 
@@ -155,6 +166,24 @@ def _response_audit_payload(response):
     return {
         "channels": list(response.channels),
         "draft": asdict(response.draft) if is_dataclass(response.draft) else {},
+    }
+
+
+def ai_generation_response_payload(response):
+    """Return API-safe generated draft content without provider credential material."""
+    draft = asdict(response.draft) if is_dataclass(response.draft) else {}
+    return {
+        "provider": {
+            "id": response.provider_id,
+            "name": response.provider_name,
+            "provider_type": response.provider_type,
+            "model_name": response.model_name,
+        },
+        "channels": list(response.channels),
+        "draft": draft,
+        "risk_flags": list(response.risk_flags or []),
+        "safety_notes": list(response.safety_notes or []),
+        "metadata": dict(response.metadata or {}),
     }
 
 
@@ -1290,3 +1319,103 @@ def generate_ai_scenario(conn, provider_id, request):
 
     _record_ai_generation_audit(conn, provider_settings, request, response=response)
     return response
+
+
+def list_ai_campaign_drafts(conn, campaign_id=None):
+    """Return saved AI-generated campaign drafts with preserved history."""
+    params = []
+    where = ""
+    if campaign_id is not None:
+        where = "WHERE d.campaign_id = ?"
+        params.append(campaign_id)
+    rows = _rows_to_dicts(
+        conn.execute(
+            f"""
+            SELECT
+                d.id,
+                d.campaign_id,
+                c.name AS campaign_name,
+                d.audit_id,
+                d.provider_id,
+                d.provider_name,
+                d.provider_type,
+                d.model_name,
+                d.channels,
+                d.email_subject,
+                d.email_body,
+                d.sms_body,
+                d.voice_script,
+                d.landing_text,
+                d.training_text,
+                d.risk_flags,
+                d.safety_notes,
+                d.metadata,
+                d.status,
+                d.created_at,
+                d.updated_at
+            FROM ai_campaign_drafts d
+            JOIN simulation_campaigns c ON c.id = d.campaign_id
+            {where}
+            ORDER BY d.created_at DESC, d.id DESC
+            """,
+            params,
+        )
+    )
+    return [_ai_draft_response(row) for row in rows]
+
+
+def save_ai_campaign_draft(
+    conn,
+    campaign_id,
+    draft,
+    channels,
+    provider=None,
+    risk_flags=None,
+    safety_notes=None,
+    metadata=None,
+    audit_id=None,
+    status="approved",
+):
+    """Persist approved AI drafts as campaign simulation content."""
+    campaign = get_campaign(conn, campaign_id)
+    if not campaign:
+        raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
+
+    draft = draft or {}
+    provider = provider or {}
+    normalized_channels = _normalize_channels(channels)
+    now = _utc_now()
+    cursor = conn.execute(
+        """
+        INSERT INTO ai_campaign_drafts (
+            campaign_id, audit_id, provider_id, provider_name, provider_type,
+            model_name, channels, email_subject, email_body, sms_body,
+            voice_script, landing_text, training_text, risk_flags,
+            safety_notes, metadata, status, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            campaign_id,
+            audit_id,
+            provider.get("id") or provider.get("provider_id"),
+            _normalize_text(provider.get("name") or provider.get("provider_name")),
+            _normalize_text(provider.get("provider_type")),
+            _normalize_text(provider.get("model_name")),
+            json.dumps(normalized_channels),
+            _normalize_text(draft.get("email_subject")),
+            _normalize_text(draft.get("email_body")),
+            _normalize_text(draft.get("sms_body")),
+            _normalize_text(draft.get("voice_script")),
+            _normalize_text(draft.get("landing_text")),
+            _normalize_text(draft.get("training_text")),
+            json.dumps(list(risk_flags or []), sort_keys=True),
+            json.dumps(list(safety_notes or []), sort_keys=True),
+            _safe_json_dumps(metadata),
+            _normalize_text(status) or "approved",
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return list_ai_campaign_drafts(conn, campaign_id)[0] if cursor.lastrowid else None

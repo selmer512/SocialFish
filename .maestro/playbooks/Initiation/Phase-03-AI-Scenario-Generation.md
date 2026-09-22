@@ -24,11 +24,14 @@ This phase adds an implementation-neutral AI layer for creating authorized train
   - Store generation prompts, selected provider, generated outputs, risk flags, and timestamps in a database table for auditability
   - Avoid logging secrets or full provider credentials
 
-- [ ] Add authenticated AI generation routes:
+- [x] Add authenticated AI generation routes:
   - `GET /simulations/ai-builder` renders the scenario generation UI
   - `POST /api/simulations/ai/generate` generates drafts for selected channels
   - `POST /api/simulations/ai/save-draft` saves approved drafts to a campaign as simulation content
   - Return structured JSON errors for missing provider configuration, blocked content, and provider failures
+  - Added authenticated routes in `SocialFish.py` for the AI Builder page, guarded generation API, and approved draft save API.
+  - Added `ai_campaign_drafts` schema plus service helpers so saved AI drafts are persisted as campaign-linked simulation content without overwriting history.
+  - Added route tests for builder rendering, local mock generation, draft saving, blocked content errors, disabled provider errors, and secret redaction.
 
 - [ ] Build the AI scenario builder UI:
   - Add a form for campaign, audience, channel selection, tone, difficulty, scenario objective, and training reminder

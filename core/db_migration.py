@@ -718,6 +718,55 @@ def migrate_db(database_path):
         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     })
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ai_campaign_drafts (
+            id INTEGER PRIMARY KEY,
+            campaign_id INTEGER NOT NULL,
+            audit_id INTEGER,
+            provider_id INTEGER,
+            provider_name TEXT,
+            provider_type TEXT,
+            model_name TEXT,
+            channels TEXT NOT NULL,
+            email_subject TEXT,
+            email_body TEXT,
+            sms_body TEXT,
+            voice_script TEXT,
+            landing_text TEXT,
+            training_text TEXT,
+            risk_flags TEXT,
+            safety_notes TEXT,
+            metadata TEXT,
+            status TEXT NOT NULL DEFAULT 'approved',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (campaign_id) REFERENCES simulation_campaigns(id),
+            FOREIGN KEY (audit_id) REFERENCES ai_generation_audits(id),
+            FOREIGN KEY (provider_id) REFERENCES ai_provider_configs(id)
+        )
+    """)
+    _ensure_columns(cur, "ai_campaign_drafts", {
+        "campaign_id": "INTEGER",
+        "audit_id": "INTEGER",
+        "provider_id": "INTEGER",
+        "provider_name": "TEXT",
+        "provider_type": "TEXT",
+        "model_name": "TEXT",
+        "channels": "TEXT NOT NULL DEFAULT '[]'",
+        "email_subject": "TEXT",
+        "email_body": "TEXT",
+        "sms_body": "TEXT",
+        "voice_script": "TEXT",
+        "landing_text": "TEXT",
+        "training_text": "TEXT",
+        "risk_flags": "TEXT",
+        "safety_notes": "TEXT",
+        "metadata": "TEXT",
+        "status": "TEXT NOT NULL DEFAULT 'approved'",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
     _seed_simulation_demo(cur)
     
     conn.commit()

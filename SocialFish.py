@@ -18,8 +18,10 @@ from core.simulation_service import (
     TARGET_CSV_COLUMNS,
     archive_campaign,
     archive_target,
+    ai_generation_response_payload,
     create_campaign,
     create_target,
+    generate_ai_scenario,
     get_campaign_metrics,
     get_campaign_detail,
     import_targets_csv,
@@ -27,9 +29,18 @@ from core.simulation_service import (
     list_campaigns,
     list_targets,
     record_simulation_event,
+    save_ai_campaign_draft,
     update_campaign,
     update_ai_provider_settings,
     update_target,
+)
+from core.ai_generation import (
+    AIContentPolicyError,
+    AIDisabledProviderError,
+    AIGenerationError,
+    AIProviderConfigurationError,
+    AIProviderTypeError,
+    AIScenarioRequest,
 )
 from core.tunnel_manager import TunnelManager
 from core.recorder_playwright import PlaywrightRecorder
@@ -201,6 +212,45 @@ def _target_payload(include_active=True):
     if include_active and "active" in data:
         payload["active"] = _form_bool(data.get("active"))
     return payload
+
+
+def _json_error(error_type, message, status_code=400, **extra):
+    payload = {
+        "status": "error",
+        "error": {
+            "type": error_type,
+            "message": message,
+        },
+    }
+    payload["error"].update(extra)
+    return jsonify(payload), status_code
+
+
+def _ai_generation_payload():
+    data = _request_data()
+    campaign_id = _optional_int(data.get("campaign_id"))
+    campaign_context = data.get("campaign_context") if isinstance(data.get("campaign_context"), dict) else {}
+    if campaign_id:
+        campaign = get_campaign_detail(g.db, campaign_id)["campaign"]
+        campaign_context.update({
+            "campaign_id": campaign["id"],
+            "campaign_name": campaign["name"],
+            "objective": campaign.get("objective"),
+            "authorized_scope": campaign.get("authorized_scope"),
+        })
+    return {
+        "provider_id": _optional_int(data.get("provider_id") or data.get("ai_provider_id")),
+        "request": AIScenarioRequest(
+            scenario_goal=data.get("scenario_goal") or data.get("objective"),
+            audience=data.get("audience"),
+            channels=data.get("channels") or data.get("selected_channels") or _request_channels(),
+            tone=data.get("tone") or "professional",
+            difficulty=data.get("difficulty") or "standard",
+            safety_constraints=data.get("safety_constraints") or (),
+            campaign_context=campaign_context,
+            training_reminder=data.get("training_reminder"),
+        ),
+    }
 
 # Conta o numero de credenciais salvas no banco
 def countCreds():
@@ -625,6 +675,64 @@ def simulation_events_api():
         return jsonify({'status': 'ok', 'event': event})
     except (TypeError, ValueError) as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
+
+
+@app.route("/simulations/ai-builder", methods=['GET'])
+@flask_login.login_required
+def ai_scenario_builder():
+    return render_template(
+        'admin/ai_builder.html',
+        campaigns=list_campaigns(g.db),
+        providers=list_ai_provider_settings(g.db),
+        channels=("email", "sms", "voice"),
+        difficulties=("introductory", "standard", "advanced"),
+        tones=("professional", "calm", "plainspoken", "supportive"),
+    )
+
+
+@app.route("/api/simulations/ai/generate", methods=['POST'])
+@flask_login.login_required
+def ai_generate_api():
+    try:
+        payload = _ai_generation_payload()
+        if not payload["provider_id"]:
+            return _json_error("missing_provider_configuration", "Choose an enabled AI provider before generating drafts.")
+        response = generate_ai_scenario(g.db, payload["provider_id"], payload["request"])
+        return jsonify({
+            "status": "ok",
+            "generation": ai_generation_response_payload(response),
+        })
+    except (AIDisabledProviderError, AIProviderConfigurationError, AIProviderTypeError, ValueError) as e:
+        return _json_error("missing_provider_configuration", str(e), 400)
+    except AIContentPolicyError as e:
+        return _json_error("blocked_content", str(e), 400, risk_flags=e.risk_flags)
+    except AIGenerationError as e:
+        return _json_error("provider_failure", str(e), 502)
+    except Exception as e:
+        logger.exception("AI generation provider failure")
+        return _json_error("provider_failure", str(e), 502)
+
+
+@app.route("/api/simulations/ai/save-draft", methods=['POST'])
+@flask_login.login_required
+def ai_save_draft_api():
+    data = _request_data()
+    try:
+        draft = save_ai_campaign_draft(
+            g.db,
+            _optional_int(data.get("campaign_id")),
+            data.get("draft") if isinstance(data.get("draft"), dict) else data,
+            data.get("channels") or data.get("selected_channels") or _request_channels(),
+            provider=data.get("provider") if isinstance(data.get("provider"), dict) else {},
+            risk_flags=data.get("risk_flags") or [],
+            safety_notes=data.get("safety_notes") or [],
+            metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
+            audit_id=_optional_int(data.get("audit_id")),
+            status=data.get("status") or "approved",
+        )
+        return jsonify({"status": "ok", "draft": draft})
+    except (TypeError, ValueError) as e:
+        return _json_error("missing_provider_configuration", str(e), 400)
 
 
 @app.route("/ai-settings", methods=['GET'])
