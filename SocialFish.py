@@ -19,16 +19,20 @@ from core.simulation_service import (
     archive_campaign,
     archive_target,
     ai_generation_response_payload,
+    build_delivery_preview,
     create_campaign,
+    create_delivery_job_from_campaign,
     create_target,
     generate_ai_scenario,
     get_campaign_metrics,
     get_campaign_detail,
+    get_delivery_job_status,
     import_targets_csv,
     list_ai_provider_settings,
     list_campaigns,
     list_targets,
     record_simulation_event,
+    run_delivery_job,
     save_ai_campaign_draft,
     update_campaign,
     update_ai_provider_settings,
@@ -250,6 +254,36 @@ def _ai_generation_payload():
             campaign_context=campaign_context,
             training_reminder=data.get("training_reminder"),
         ),
+    }
+
+
+def _delivery_provider_ids(data):
+    provider_ids = data.get("provider_ids")
+    if isinstance(provider_ids, dict):
+        return {
+            str(channel): _optional_int(provider_id)
+            for channel, provider_id in provider_ids.items()
+            if _optional_int(provider_id) is not None
+        }
+
+    provider_ids = {}
+    for channel in ("email", "sms", "voice"):
+        provider_id = _optional_int(data.get("{}_provider_id".format(channel)))
+        if provider_id is not None:
+            provider_ids[channel] = provider_id
+
+    provider_id = _optional_int(data.get("provider_id"))
+    if provider_id is not None and not provider_ids:
+        return provider_id
+    return provider_ids or None
+
+
+def _delivery_payload():
+    data = _request_data()
+    return {
+        "mode": data.get("mode") or "dry_run",
+        "provider_ids": _delivery_provider_ids(data),
+        "max_retries": int(data.get("max_retries") or 0),
     }
 
 # Conta o numero de credenciais salvas no banco
@@ -541,6 +575,70 @@ def simulation_campaign_detail(campaign_id):
         target_csv_required_columns=TARGET_CSV_REQUIRED_COLUMNS,
         target_csv_optional_columns=TARGET_CSV_OPTIONAL_COLUMNS,
     )
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>/deliveries/preview", methods=['POST'])
+@flask_login.login_required
+def preview_simulation_delivery(campaign_id):
+    try:
+        payload = _delivery_payload()
+        preview = build_delivery_preview(
+            g.db,
+            campaign_id,
+            provider_ids=payload["provider_ids"],
+            mode=payload["mode"],
+        )
+        return jsonify({"status": "ok", "preview": preview})
+    except (TypeError, ValueError) as e:
+        return _json_error("delivery_preview_error", str(e), 400)
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>/deliveries/start", methods=['POST'])
+@flask_login.login_required
+def start_simulation_delivery(campaign_id):
+    try:
+        payload = _delivery_payload()
+        created = create_delivery_job_from_campaign(
+            g.db,
+            campaign_id,
+            provider_ids=payload["provider_ids"],
+            mode=payload["mode"],
+            requested_by=flask_login.current_user.get_id(),
+            max_retries=payload["max_retries"],
+        )
+        status = run_delivery_job(g.db, created["job"]["id"])
+        if request.is_json:
+            return jsonify({"status": "ok", "delivery": status})
+        flash("Delivery job #{} started in {} mode.".format(status["job"]["id"], status["job"]["mode"]), "success")
+        return redirect("/simulations/deliveries/{}".format(status["job"]["id"]))
+    except (TypeError, ValueError) as e:
+        if request.is_json:
+            return _json_error("delivery_start_error", str(e), 400)
+        flash(str(e), "danger")
+        return redirect("/simulations/campaigns/{}".format(campaign_id))
+
+
+@app.route("/simulations/deliveries/<int:job_id>", methods=['GET'])
+@flask_login.login_required
+def simulation_delivery_status(job_id):
+    try:
+        status = get_delivery_job_status(g.db, job_id)
+    except ValueError as e:
+        flash(str(e), "danger")
+        return redirect("/simulations/campaigns")
+    return render_template(
+        'admin/simulation_delivery_status.html',
+        delivery=status,
+    )
+
+
+@app.route("/api/simulations/deliveries/<int:job_id>", methods=['GET'])
+@flask_login.login_required
+def simulation_delivery_status_api(job_id):
+    try:
+        return jsonify({"status": "ok", "delivery": get_delivery_job_status(g.db, job_id)})
+    except ValueError as e:
+        return _json_error("delivery_status_error", str(e), 404)
 
 
 @app.route("/simulations/campaigns/<int:campaign_id>", methods=['POST'])

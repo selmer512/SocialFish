@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>SocialFish Delivery Status</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbiyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/simulations/campaigns/{{ delivery.job.campaign_id }}"><i class="fas fa-arrow-left"></i> <strong>SocialFish</strong></a>/Delivery #{{ delivery.job.id }}
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    <strong>Authorized internal training simulations only.</strong>
+                    Delivery status shows orchestration results and provider responses for this simulation job.
+                </div>
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }}" role="alert">{{ message }}</div>
+                {% endfor %}
+                {% endwith %}
+                <div class="row">
+                    <div class="col-md-8">
+                        <h3 class="title-5 m-b-35">Delivery Job #{{ delivery.job.id }}</h3>
+                    </div>
+                    <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-outline-secondary btn-sm" href="/api/simulations/deliveries/{{ delivery.job.id }}">
+                            <i class="fas fa-code"></i>&nbsp; JSON Status
+                        </a>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-2"><strong>{{ delivery.job.status }}</strong><br><small>Status</small></div>
+                    <div class="col-md-2"><strong>{{ delivery.job.mode }}</strong><br><small>Mode</small></div>
+                    <div class="col-md-2"><strong>{{ delivery.job.total_attempts }}</strong><br><small>Attempts</small></div>
+                    <div class="col-md-2"><strong>{{ delivery.job.delivered_count }}</strong><br><small>Delivered</small></div>
+                    <div class="col-md-2"><strong>{{ delivery.job.failed_count }}</strong><br><small>Failed</small></div>
+                    <div class="col-md-2"><strong>{{ delivery.job.retry_count }}</strong><br><small>Retries</small></div>
+                </div>
+                {% if delivery.job.mode == "dry_run" %}
+                <div class="alert alert-secondary mt-3" role="alert">
+                    Dry-run delivery recorded attempts and events without sending external email, SMS, or voice traffic.
+                </div>
+                {% endif %}
+                <hr>
+                <h4 class="mb-3">Provider Snapshot</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr><th>Channel</th><th>Provider</th><th>Type</th><th>Enabled</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for channel, provider in delivery.job.provider_snapshot.items() %}
+                            <tr class="tr-shadow">
+                                <td><span class="badge badge-secondary">{{ channel }}</span></td>
+                                <td>{{ provider.provider_name }}</td>
+                                <td>{{ provider.provider_type }}</td>
+                                <td>{{ provider.enabled }}</td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="4">No providers were captured for this job.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <hr>
+                <h4 class="mb-3">Delivery Attempts</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr><th>Target</th><th>Channel</th><th>Provider</th><th>Status</th><th>Message</th><th>Updated</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for attempt in delivery.attempts %}
+                            <tr class="tr-shadow">
+                                <td>
+                                    {{ attempt.target_display_name or attempt.target_name }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ attempt.target_email or attempt.target_phone or "No contact" }}</small>
+                                </td>
+                                <td><span class="badge badge-secondary">{{ attempt.channel }}</span></td>
+                                <td>
+                                    {{ attempt.provider_name or attempt.provider or "Unknown provider" }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ attempt.provider_type or "provider" }}</small>
+                                </td>
+                                <td>{{ attempt.status }}</td>
+                                <td>
+                                    {{ attempt.provider_message_id or attempt.error_message or "No provider message" }}
+                                </td>
+                                <td>{{ attempt.updated_at }}</td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="6">No attempts were created for this job.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <hr>
+                <h4 class="mb-3">Tracking Tokens</h4>
+                <div class="row">
+                    <div class="col-md-4"><strong>{{ delivery.tracking_tokens|selectattr("token_type", "equalto", "open")|list|length }}</strong><br><small>Open tokens</small></div>
+                    <div class="col-md-4"><strong>{{ delivery.tracking_tokens|selectattr("token_type", "equalto", "link")|list|length }}</strong><br><small>Link tokens</small></div>
+                    <div class="col-md-4"><strong>{{ delivery.tracking_tokens|selectattr("token_type", "equalto", "attachment")|list|length }}</strong><br><small>Attachment tokens</small></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>

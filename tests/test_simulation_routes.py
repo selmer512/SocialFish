@@ -329,6 +329,70 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(payload["event"]["event_type"], "attachment_open")
         self.assertNotIn("route-pass", str(payload))
 
+    def test_delivery_routes_preview_start_and_render_status(self):
+        campaign_id = self._campaign_id()
+
+        preview_response = self.client.post(
+            "/simulations/campaigns/{}/deliveries/preview".format(campaign_id),
+            json={"mode": "dry_run"},
+        )
+        preview_payload = preview_response.get_json()
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_payload["status"], "ok")
+        self.assertEqual(preview_payload["preview"]["mode"], "dry_run")
+        self.assertEqual(preview_payload["preview"]["total_targets"], 4)
+        self.assertEqual(set(preview_payload["preview"]["providers"].keys()), {"email", "sms", "voice"})
+        self.assertEqual(preview_payload["preview"]["providers"]["email"]["provider_key"], "dry_run_email")
+
+        start_response = self.client.post(
+            "/simulations/campaigns/{}/deliveries/start".format(campaign_id),
+            json={"mode": "dry_run", "max_retries": 0},
+        )
+        start_payload = start_response.get_json()
+        job_id = start_payload["delivery"]["job"]["id"]
+
+        self.assertEqual(start_response.status_code, 200)
+        self.assertEqual(start_payload["status"], "ok")
+        self.assertEqual(start_payload["delivery"]["job"]["status"], "completed")
+        self.assertEqual(start_payload["delivery"]["job"]["delivered_count"], 4)
+        self.assertEqual(len(start_payload["delivery"]["attempts"]), 4)
+        self.assertEqual(len(start_payload["delivery"]["tracking_tokens"]), 12)
+        self.assertNotIn("route-pass", str(start_payload))
+
+        api_response = self.client.get("/api/simulations/deliveries/{}".format(job_id))
+        api_payload = api_response.get_json()
+
+        self.assertEqual(api_response.status_code, 200)
+        self.assertEqual(api_payload["status"], "ok")
+        self.assertEqual(api_payload["delivery"]["job"]["id"], job_id)
+        self.assertEqual(api_payload["delivery"]["job"]["mode"], "dry_run")
+
+        page_response = self.client.get("/simulations/deliveries/{}".format(job_id))
+
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn(b"Delivery Job #", page_response.data)
+        self.assertIn(b"Dry-run delivery recorded attempts", page_response.data)
+        self.assertIn(b"Provider Snapshot", page_response.data)
+        self.assertIn(b"Delivery Attempts", page_response.data)
+        self.assertIn(b"Tracking Tokens", page_response.data)
+
+    def test_delivery_routes_return_structured_errors(self):
+        missing_status = self.client.get("/api/simulations/deliveries/999999")
+        missing_payload = missing_status.get_json()
+
+        self.assertEqual(missing_status.status_code, 404)
+        self.assertEqual(missing_payload["error"]["type"], "delivery_status_error")
+
+        missing_preview = self.client.post(
+            "/simulations/campaigns/999999/deliveries/preview",
+            json={"mode": "dry_run"},
+        )
+        missing_preview_payload = missing_preview.get_json()
+
+        self.assertEqual(missing_preview.status_code, 400)
+        self.assertEqual(missing_preview_payload["error"]["type"], "delivery_preview_error")
+
     def test_ai_settings_api_does_not_echo_secret(self):
         conn = sqlite3.connect(self.db_path)
         try:

@@ -50,11 +50,17 @@ This phase adds simulation delivery orchestration and event tracking for email, 
   - Dry-run provider execution records provider responses and updates job/target rollups while skipping already delivered attempts on rerun.
   - Verified with focused orchestration tests and `python -m unittest discover tests`.
 
-- [ ] Add authenticated delivery routes:
+- [x] Add authenticated delivery routes:
   - `POST /simulations/campaigns/<id>/deliveries/preview` builds a delivery preview from current campaign content and targets
   - `POST /simulations/campaigns/<id>/deliveries/start` starts a dry-run or enabled-provider delivery job from the UI
   - `GET /simulations/deliveries/<job_id>` renders delivery job status
   - `GET /api/simulations/deliveries/<job_id>` returns delivery job status JSON
+
+  Completed 2026-09-22:
+  - Added authenticated preview, start, rendered status, and JSON status routes for simulation delivery jobs.
+  - Delivery starts now create and run jobs through the existing orchestration service while preserving dry-run safety semantics.
+  - Added a delivery status template showing job counters, provider snapshot, attempts, and tracking-token counts.
+  - Verified with focused route coverage and `python -m unittest discover tests`.
 
 - [ ] Add tracking endpoints for simulation events:
   - Add a pixel or lightweight open-tracking endpoint scoped to simulation tokens
