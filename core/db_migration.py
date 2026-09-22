@@ -685,6 +685,39 @@ def migrate_db(database_path):
         "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     })
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ai_generation_audits (
+            id INTEGER PRIMARY KEY,
+            provider_id INTEGER,
+            provider_name TEXT,
+            provider_type TEXT,
+            model_name TEXT,
+            request_json TEXT NOT NULL,
+            output_json TEXT,
+            risk_flags TEXT,
+            safety_notes TEXT,
+            metadata TEXT,
+            status TEXT NOT NULL,
+            error_reason TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (provider_id) REFERENCES ai_provider_configs(id)
+        )
+    """)
+    _ensure_columns(cur, "ai_generation_audits", {
+        "provider_id": "INTEGER",
+        "provider_name": "TEXT",
+        "provider_type": "TEXT",
+        "model_name": "TEXT",
+        "request_json": "TEXT",
+        "output_json": "TEXT",
+        "risk_flags": "TEXT",
+        "safety_notes": "TEXT",
+        "metadata": "TEXT",
+        "status": "TEXT NOT NULL DEFAULT 'generated'",
+        "error_reason": "TEXT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
     _seed_simulation_demo(cur)
     
     conn.commit()

@@ -1,10 +1,21 @@
 from dataclasses import dataclass, field
+import re
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 
 AI_GENERATION_LABEL = "authorized_security_awareness_training"
 VALID_AI_CHANNELS = {"email", "sms", "voice"}
 VALID_AI_DIFFICULTIES = {"introductory", "standard", "advanced"}
+BLOCKED_REQUEST_PATTERNS = (
+    (re.compile(r"\b(capture|collect|harvest|steal|exfiltrate)\b.{0,40}\b(passwords?|credentials?|logins?|tokens?|mfa|otp)\b", re.I), "credential_harvesting_request"),
+    (re.compile(r"\b(passwords?|credentials?|logins?|tokens?|mfa|otp)\b.{0,40}\b(capture|collect|harvest|steal|exfiltrate)\b", re.I), "credential_harvesting_request"),
+    (re.compile(r"\b(bypass|disable|evade)\b.{0,40}\b(mfa|2fa|security|detection|filter)\b", re.I), "offensive_capability_request"),
+    (re.compile(r"\b(impersonate|spoof|clone)\b.{0,40}\b(microsoft|google|okta|duo|apple|amazon|paypal|bank|irs|docusign)\b", re.I), "real_brand_impersonation_request"),
+)
+BLOCKED_OUTPUT_PATTERNS = (
+    (re.compile(r"(?<!do not )(?<!never )\b(enter|submit|provide|share|send)\b.{0,40}\b(passwords?|credentials?|logins?|tokens?|mfa|otp)\b", re.I), "credential_harvesting_output"),
+    (re.compile(r"\b(ignore|bypass|disable)\b.{0,40}\b(security|mfa|2fa|warning|filter)\b", re.I), "offensive_capability_output"),
+)
 
 
 def _clean_text(value):
@@ -195,6 +206,14 @@ class AIProviderTypeError(AIGenerationError):
     """Raised when no adapter exists for a configured provider type."""
 
 
+class AIContentPolicyError(AIGenerationError):
+    """Raised when a request or generated artifact violates training guardrails."""
+
+    def __init__(self, message, risk_flags=None):
+        super().__init__(message)
+        self.risk_flags = list(risk_flags or [])
+
+
 def _require_enabled(provider_config):
     if not provider_config.enabled:
         raise AIDisabledProviderError("AI provider '{}' is disabled.".format(provider_config.name))
@@ -206,12 +225,72 @@ def _join_constraints(request):
     return " ".join(request.safety_constraints)
 
 
+def _joined_request_text(request):
+    pieces = [
+        request.scenario_goal,
+        request.audience,
+        request.tone,
+        request.difficulty,
+        request.training_reminder,
+        " ".join(request.safety_constraints),
+    ]
+    pieces.extend(str(value) for value in request.campaign_context.values())
+    return "\n".join(str(piece or "") for piece in pieces)
+
+
+def _draft_text(draft):
+    return "\n".join(
+        str(value or "")
+        for value in (
+            draft.email_subject,
+            draft.email_body,
+            draft.sms_body,
+            draft.voice_script,
+            draft.landing_text,
+            draft.training_text,
+        )
+    )
+
+
+def _pattern_flags(text, patterns):
+    return [flag for pattern, flag in patterns if pattern.search(text or "")]
+
+
+def validate_generation_request(request):
+    """Block requests that ask for harmful capability outside training simulations."""
+    risk_flags = _pattern_flags(_joined_request_text(request), BLOCKED_REQUEST_PATTERNS)
+    if risk_flags:
+        raise AIContentPolicyError(
+            "AI generation request was blocked by safety guardrails: {}".format(", ".join(sorted(set(risk_flags)))),
+            risk_flags=sorted(set(risk_flags)),
+        )
+
+
+def validate_generation_response(response):
+    """Require authorized-training labeling and reject unsafe generated artifacts."""
+    labels = {
+        response.metadata.get("artifact_label"),
+        response.draft.metadata.get("artifact_label"),
+    }
+    risk_flags = []
+    if AI_GENERATION_LABEL not in labels or len(labels) != 1:
+        risk_flags.append("missing_authorized_training_label")
+    risk_flags.extend(_pattern_flags(_draft_text(response.draft), BLOCKED_OUTPUT_PATTERNS))
+    if risk_flags:
+        raise AIContentPolicyError(
+            "AI generated artifact was blocked by safety guardrails: {}".format(", ".join(sorted(set(risk_flags)))),
+            risk_flags=sorted(set(risk_flags)),
+        )
+    return response
+
+
 class LocalMockScenarioProvider:
     """Deterministic offline provider for safe awareness-training drafts."""
 
     provider_type = "local"
 
     def generate(self, request, provider_config):
+        validate_generation_request(request)
         _require_enabled(provider_config)
 
         topic = request.scenario_goal
@@ -255,7 +334,7 @@ class LocalMockScenarioProvider:
                 "credentials, and use the approved reporting process."
             ).format(audience, topic)
 
-        return AIGenerationResponse(
+        return validate_generation_response(AIGenerationResponse(
             provider_id=provider_config.id,
             provider_name=provider_config.name,
             provider_type=provider_config.provider_type,
@@ -277,7 +356,7 @@ class LocalMockScenarioProvider:
                 "provider_shape": "local_mock",
                 "safety_constraints": _join_constraints(request),
             },
-        )
+        ))
 
 
 class OpenAICompatibleHTTPProvider:
@@ -286,6 +365,7 @@ class OpenAICompatibleHTTPProvider:
     provider_type = "cloud"
 
     def build_payload(self, request, provider_config):
+        validate_generation_request(request)
         _require_enabled(provider_config)
         if not provider_config.base_url:
             raise AIProviderConfigurationError("AI provider '{}' requires a base URL.".format(provider_config.name))
@@ -333,6 +413,7 @@ class LocalHTTPModelServerProvider(OpenAICompatibleHTTPProvider):
     provider_type = "local_http"
 
     def build_payload(self, request, provider_config):
+        validate_generation_request(request)
         _require_enabled(provider_config)
         if not provider_config.base_url:
             raise AIProviderConfigurationError(
@@ -373,6 +454,7 @@ def provider_for_config(provider_config):
 
 
 def generate_scenario_with_provider_settings(settings, request):
+    validate_generation_request(request)
     provider_config = AIProviderConfig.from_settings(settings)
     provider = provider_for_config(provider_config)
-    return provider.generate(request, provider_config)
+    return validate_generation_response(provider.generate(request, provider_config))

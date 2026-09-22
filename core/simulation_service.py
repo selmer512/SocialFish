@@ -1,4 +1,5 @@
 import csv
+from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from io import StringIO
 import json
@@ -99,6 +100,103 @@ def _json_list(value):
     if isinstance(parsed, list):
         return parsed
     return []
+
+
+def _json_dict(value):
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
+
+
+def _audit_response(row):
+    if not row:
+        return None
+    audit = dict(row)
+    audit["request"] = _json_dict(audit.pop("request_json", None))
+    output_json = audit.pop("output_json", None)
+    audit["output"] = _json_dict(output_json) if output_json else None
+    audit["risk_flags"] = _json_list(audit.get("risk_flags"))
+    audit["safety_notes"] = _json_list(audit.get("safety_notes"))
+    audit["metadata"] = _json_dict(audit.get("metadata"))
+    return audit
+
+
+def _safe_json_dumps(value):
+    return json.dumps(value or {}, sort_keys=True)
+
+
+def _request_audit_payload(request):
+    if is_dataclass(request):
+        payload = asdict(request)
+    else:
+        payload = {
+            "scenario_goal": getattr(request, "scenario_goal", None),
+            "audience": getattr(request, "audience", None),
+            "channels": list(getattr(request, "channels", []) or []),
+            "tone": getattr(request, "tone", None),
+            "difficulty": getattr(request, "difficulty", None),
+            "safety_constraints": list(getattr(request, "safety_constraints", []) or []),
+            "campaign_context": dict(getattr(request, "campaign_context", {}) or {}),
+            "training_reminder": getattr(request, "training_reminder", None),
+        }
+    payload["channels"] = list(payload.get("channels") or [])
+    payload["safety_constraints"] = list(payload.get("safety_constraints") or [])
+    payload["campaign_context"] = dict(payload.get("campaign_context") or {})
+    return payload
+
+
+def _response_audit_payload(response):
+    return {
+        "channels": list(response.channels),
+        "draft": asdict(response.draft) if is_dataclass(response.draft) else {},
+    }
+
+
+def _record_ai_generation_audit(
+    conn,
+    provider,
+    request,
+    response=None,
+    status="generated",
+    error_reason=None,
+    risk_flags=None,
+):
+    flags = risk_flags if risk_flags is not None else getattr(response, "risk_flags", [])
+    notes = getattr(response, "safety_notes", [])
+    metadata = getattr(response, "metadata", {})
+    now = _utc_now()
+    cursor = conn.execute(
+        """
+        INSERT INTO ai_generation_audits (
+            provider_id, provider_name, provider_type, model_name, request_json,
+            output_json, risk_flags, safety_notes, metadata, status,
+            error_reason, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            provider.get("id") if provider else None,
+            provider.get("name") if provider else None,
+            provider.get("provider_type") if provider else None,
+            provider.get("model_name") if provider else None,
+            _safe_json_dumps(_request_audit_payload(request)),
+            _safe_json_dumps(_response_audit_payload(response)) if response else None,
+            json.dumps(list(flags or []), sort_keys=True),
+            json.dumps(list(notes or []), sort_keys=True),
+            _safe_json_dumps(metadata),
+            status,
+            _normalize_text(error_reason),
+            now,
+        ),
+    )
+    conn.commit()
+    return cursor.lastrowid
 
 
 def _normalize_text(value):
@@ -1027,6 +1125,42 @@ def list_ai_provider_settings(conn):
     return [_provider_response(row) for row in _rows_to_dicts(cursor)]
 
 
+def list_ai_generation_audits(conn, provider_id=None, status=None):
+    """Return AI generation audit records without provider credential material."""
+    params = []
+    filters = []
+    if provider_id is not None:
+        filters.append("provider_id = ?")
+        params.append(provider_id)
+    if status is not None:
+        filters.append("status = ?")
+        params.append(status)
+    where = "WHERE {}".format(" AND ".join(filters)) if filters else ""
+    cursor = conn.execute(
+        f"""
+        SELECT
+            id,
+            provider_id,
+            provider_name,
+            provider_type,
+            model_name,
+            request_json,
+            output_json,
+            risk_flags,
+            safety_notes,
+            metadata,
+            status,
+            error_reason,
+            created_at
+        FROM ai_generation_audits
+        {where}
+        ORDER BY created_at DESC, id DESC
+        """,
+        params,
+    )
+    return [_audit_response(row) for row in _rows_to_dicts(cursor)]
+
+
 def update_ai_provider_settings(
     conn,
     provider_id,
@@ -1115,7 +1249,7 @@ def update_ai_provider_settings(
 
 
 def generate_ai_scenario(conn, provider_id, request):
-    """Generate drafts using only UI-managed provider settings from the database."""
+    """Generate guarded drafts and audit the request, provider, output, and risks."""
     from core.ai_generation import generate_scenario_with_provider_settings
 
     provider = _row_to_dict(
@@ -1140,4 +1274,19 @@ def generate_ai_scenario(conn, provider_id, request):
     )
     if not provider:
         raise ValueError("Unknown AI provider config id: {}".format(provider_id))
-    return generate_scenario_with_provider_settings(_provider_response(provider), request)
+    provider_settings = _provider_response(provider)
+    try:
+        response = generate_scenario_with_provider_settings(provider_settings, request)
+    except Exception as exc:
+        _record_ai_generation_audit(
+            conn,
+            provider_settings,
+            request,
+            status="blocked",
+            error_reason=str(exc),
+            risk_flags=getattr(exc, "risk_flags", []),
+        )
+        raise
+
+    _record_ai_generation_audit(conn, provider_settings, request, response=response)
+    return response

@@ -23,6 +23,7 @@ class SimulationMigrationTest(unittest.TestCase):
                 "simulation_targets",
                 "simulation_events",
                 "ai_provider_configs",
+                "ai_generation_audits",
             }
             tables = {
                 row[0]

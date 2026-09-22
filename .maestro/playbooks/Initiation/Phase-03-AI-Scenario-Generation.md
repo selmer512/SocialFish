@@ -18,7 +18,7 @@ This phase adds an implementation-neutral AI layer for creating authorized train
   - Read provider settings only from the database/UI-managed configuration created in earlier phases
   - Ensure disabled providers cannot be used for generation
 
-- [ ] Add safety and compliance guardrails to generation:
+- [x] Add safety and compliance guardrails to generation:
   - Require every generated artifact to be labeled as authorized security awareness training in metadata
   - Block credential harvesting language, real brand impersonation defaults, and instructions that increase offensive capability outside training simulations
   - Store generation prompts, selected provider, generated outputs, risk flags, and timestamps in a database table for auditability

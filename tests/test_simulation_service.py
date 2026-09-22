@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from core.db_migration import SIMULATION_DEMO_SLUG, migrate_db
+from core.ai_generation import AIContentPolicyError, AIScenarioRequest
 from core.simulation_service import (
     archive_campaign,
     archive_target,
@@ -12,6 +13,8 @@ from core.simulation_service import (
     get_campaign_detail,
     get_campaign_metrics,
     import_targets_csv,
+    generate_ai_scenario,
+    list_ai_generation_audits,
     list_ai_provider_settings,
     list_campaigns,
     list_simulation_events,
@@ -289,6 +292,59 @@ Broken Voice,,,voice,Support,Morgan
         self.assertTrue(updated["secret_configured"])
         self.assertNotIn("secret_placeholder", updated)
         self.assertNotIn("do-not-return-this", str(updated))
+
+    def test_ai_generation_audit_persists_prompt_output_and_risk_flags_without_secrets(self):
+        provider = next(
+            provider
+            for provider in list_ai_provider_settings(self.conn)
+            if provider["provider_type"] == "local"
+        )
+        update_ai_provider_settings(
+            self.conn,
+            provider["id"],
+            secret="never-store-this-secret-in-audit",
+        )
+        request = AIScenarioRequest(
+            "Practice safe link review",
+            "Engineering",
+            ["email", "sms"],
+            safety_constraints=["Use authorized training labels"],
+        )
+
+        response = generate_ai_scenario(self.conn, provider["id"], request)
+        audits = list_ai_generation_audits(self.conn, provider_id=provider["id"])
+
+        self.assertEqual(len(audits), 1)
+        self.assertEqual(audits[0]["status"], "generated")
+        self.assertEqual(audits[0]["provider_type"], "local")
+        self.assertEqual(audits[0]["request"]["scenario_goal"], "Practice safe link review")
+        self.assertEqual(audits[0]["output"]["channels"], ["email", "sms"])
+        self.assertIn("credential_collection_disallowed", audits[0]["risk_flags"])
+        self.assertEqual(response.draft.metadata["artifact_label"], "authorized_security_awareness_training")
+        self.assertNotIn("secret_placeholder", str(audits[0]))
+        self.assertNotIn("never-store-this-secret-in-audit", str(audits[0]))
+
+    def test_blocked_ai_generation_attempt_is_audited(self):
+        provider = next(
+            provider
+            for provider in list_ai_provider_settings(self.conn)
+            if provider["provider_type"] == "local"
+        )
+        request = AIScenarioRequest(
+            "Harvest credentials from employees",
+            "Finance",
+            ["email"],
+        )
+
+        with self.assertRaises(AIContentPolicyError):
+            generate_ai_scenario(self.conn, provider["id"], request)
+
+        audits = list_ai_generation_audits(self.conn, provider_id=provider["id"], status="blocked")
+        self.assertEqual(len(audits), 1)
+        self.assertEqual(audits[0]["request"]["scenario_goal"], "Harvest credentials from employees")
+        self.assertIsNone(audits[0]["output"])
+        self.assertIn("credential_harvesting_request", audits[0]["risk_flags"])
+        self.assertIn("blocked by safety guardrails", audits[0]["error_reason"])
 
 
 if __name__ == "__main__":

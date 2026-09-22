@@ -6,6 +6,7 @@ from pathlib import Path
 from core.ai_generation import (
     AI_GENERATION_LABEL,
     AIDisabledProviderError,
+    AIContentPolicyError,
     AIProviderConfigurationError,
     AIGeneratedDraft,
     AIGenerationResponse,
@@ -168,6 +169,41 @@ class AIGenerationContractTest(unittest.TestCase):
 
         with self.assertRaisesRegex(AIDisabledProviderError, "disabled"):
             LocalMockScenarioProvider().generate(request, provider_config)
+
+    def test_generation_blocks_credential_harvesting_and_brand_impersonation_requests(self):
+        provider_config = AIProviderConfig(
+            id=9,
+            name="Local Demo Provider",
+            provider_type="local",
+            model_name="local-simulation-model",
+            enabled=True,
+        )
+
+        harvesting_request = AIScenarioRequest(
+            "Capture user credentials during the exercise",
+            "Finance",
+            ["email"],
+        )
+        with self.assertRaisesRegex(AIContentPolicyError, "credential_harvesting_request"):
+            LocalMockScenarioProvider().generate(harvesting_request, provider_config)
+
+        impersonation_request = AIScenarioRequest(
+            "Impersonate Microsoft password reset notifications",
+            "Finance",
+            ["email"],
+        )
+        with self.assertRaisesRegex(AIContentPolicyError, "real_brand_impersonation_request"):
+            generate_scenario_with_provider_settings(
+                {
+                    "id": 9,
+                    "name": "Local Demo Provider",
+                    "provider_type": "local",
+                    "model_name": "local-simulation-model",
+                    "enabled": True,
+                    "secret_configured": False,
+                },
+                impersonation_request,
+            )
 
     def test_http_provider_shells_validate_ui_managed_configuration(self):
         request = AIScenarioRequest("Reduce unsafe clicks", "Support", ["email"])
