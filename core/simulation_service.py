@@ -380,6 +380,16 @@ def _provider_response(row):
     return provider
 
 
+def _delivery_provider_response(row):
+    provider = dict(row)
+    provider["enabled"] = _bool(provider.get("enabled"))
+    provider["settings"] = _json_dict(provider.pop("settings_json", None))
+    provider["required_settings"] = _json_list(provider.pop("required_settings_json", None))
+    provider["secret_configured"] = provider.get("secret_placeholder") == "configured"
+    provider.pop("secret_placeholder", None)
+    return provider
+
+
 def _campaign_response(row):
     if not row:
         return None
@@ -1151,6 +1161,134 @@ def get_simulation_event(conn, event_id):
             (event_id,),
         )
     )
+
+
+def list_delivery_provider_settings(conn, channel=None):
+    """Return delivery provider settings without secret material."""
+    params = []
+    filters = []
+    if channel is not None:
+        normalized_channel = (_normalize_text(channel) or "").lower()
+        if normalized_channel not in VALID_SIMULATION_CHANNELS:
+            raise ValueError("Delivery provider channel must be one of: {}".format(", ".join(sorted(VALID_SIMULATION_CHANNELS))))
+        filters.append("channel = ?")
+        params.append(normalized_channel)
+    where = "WHERE {}".format(" AND ".join(filters)) if filters else ""
+    cursor = conn.execute(
+        f"""
+        SELECT
+            id,
+            channel,
+            provider_key,
+            provider_name,
+            provider_type,
+            enabled,
+            settings_json,
+            required_settings_json,
+            secret_placeholder,
+            last_error_message,
+            created_at,
+            updated_at
+        FROM simulation_channel_providers
+        {where}
+        ORDER BY channel ASC, provider_type ASC, provider_name ASC
+        """,
+        params,
+    )
+    return [_delivery_provider_response(row) for row in _rows_to_dicts(cursor)]
+
+
+def get_delivery_provider_settings(conn, provider_id):
+    provider = _row_to_dict(
+        conn.execute(
+            """
+            SELECT
+                id,
+                channel,
+                provider_key,
+                provider_name,
+                provider_type,
+                enabled,
+                settings_json,
+                required_settings_json,
+                secret_placeholder,
+                last_error_message,
+                created_at,
+                updated_at
+            FROM simulation_channel_providers
+            WHERE id = ?
+            """,
+            (provider_id,),
+        )
+    )
+    return _delivery_provider_response(provider) if provider else None
+
+
+def update_delivery_provider_settings(
+    conn,
+    provider_id,
+    provider_name=None,
+    enabled=None,
+    settings=None,
+    secret=None,
+    last_error_message=None,
+):
+    """Update UI-managed delivery provider settings without storing secret text."""
+    existing = _row_to_dict(
+        conn.execute(
+            "SELECT * FROM simulation_channel_providers WHERE id = ?",
+            (provider_id,),
+        )
+    )
+    if not existing:
+        raise ValueError("Unknown delivery provider config id: {}".format(provider_id))
+
+    existing_settings = _json_dict(existing.get("settings_json"))
+    if settings is not None:
+        if not isinstance(settings, dict):
+            raise ValueError("Delivery provider settings must be a JSON object.")
+        existing_settings.update({
+            str(key): _normalize_text(value)
+            for key, value in settings.items()
+            if _normalize_text(key)
+        })
+
+    now = _utc_now()
+    updated = {
+        "provider_name": _normalize_text(provider_name) or existing["provider_name"],
+        "enabled": 1 if bool(enabled) else 0 if enabled is not None else existing["enabled"],
+        "settings_json": _safe_json_dumps(existing_settings),
+        "secret_placeholder": existing["secret_placeholder"],
+        "last_error_message": _normalize_text(last_error_message),
+        "updated_at": now,
+    }
+    if secret:
+        updated["secret_placeholder"] = "configured"
+
+    conn.execute(
+        """
+        UPDATE simulation_channel_providers
+        SET
+            provider_name = ?,
+            enabled = ?,
+            settings_json = ?,
+            secret_placeholder = ?,
+            last_error_message = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            updated["provider_name"],
+            updated["enabled"],
+            updated["settings_json"],
+            updated["secret_placeholder"],
+            updated["last_error_message"],
+            updated["updated_at"],
+            provider_id,
+        ),
+    )
+    conn.commit()
+    return get_delivery_provider_settings(conn, provider_id)
 
 
 def list_ai_provider_settings(conn):

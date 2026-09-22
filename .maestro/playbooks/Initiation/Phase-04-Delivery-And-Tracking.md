@@ -26,11 +26,17 @@ This phase adds simulation delivery orchestration and event tracking for email, 
   - Extended service event taxonomy for queued, sent, failed, and voice response events without enabling external delivery.
   - Verified with `python -m unittest discover tests`.
 
-- [ ] Implement delivery provider adapters:
+- [x] Implement delivery provider adapters:
   - Add a dry-run email adapter that records send attempts without sending external email
   - Add dry-run SMS and voice adapters that record simulated delivery events without contacting telecom providers
   - Add configuration-ready adapter shells for SMTP/email API, SMS API, and voice API providers using database-managed settings
   - Prevent real provider execution unless the provider is explicitly enabled in the GUI and has the required settings
+
+  Completed 2026-09-22:
+  - Added provider-neutral delivery adapter contracts in `core/delivery_adapters.py` with safe dry-run email, SMS, and voice adapters.
+  - Added configuration-ready SMTP, email API, SMS API, and voice API shells that validate database-managed settings and refuse real execution until provider-specific sending is implemented.
+  - Added delivery provider settings helpers in `core/simulation_service.py` that redact secret placeholders while preserving enabled state, required settings, and UI-managed configuration.
+  - Verified dry-run behavior and provider safety checks with `python -m unittest discover tests`.
 
 - [ ] Implement delivery orchestration services:
   - Add functions to create delivery jobs from campaigns and active targets
