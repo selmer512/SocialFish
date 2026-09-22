@@ -51,7 +51,7 @@ This phase adds an implementation-neutral AI layer for creating authorized train
   - Include wiki-links to `[[Simulation-Campaigns]]`, `[[AI-Provider-Configuration]]`, and `[[Simulation-Metrics]]`
   - Document GUI configuration, supported provider shapes, safety guardrails, and local mock behavior
 
-- [ ] Add automated coverage for AI generation:
+- [x] Add automated coverage for AI generation:
   - Test local mock generation for email, SMS, and voice channels
   - Test disabled provider handling
   - Test risk flag persistence and draft history

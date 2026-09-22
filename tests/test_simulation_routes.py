@@ -205,6 +205,55 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"/simulations/ai-builder?campaign_id=", detail_response.data)
         self.assertIn(b"/ai-settings", detail_response.data)
 
+    def test_ai_generation_api_covers_channels_and_redacts_secrets(self):
+        campaign_id = self._campaign_id()
+        provider_id = self._provider_id("local")
+        secret = "route-secret-never-returned"
+
+        settings_response = self.client.post(
+            "/api/ai-settings",
+            json={
+                "provider_id": provider_id,
+                "model_name": "local-simulation-model",
+                "enabled": True,
+                "secret": secret,
+            },
+        )
+        settings_payload = settings_response.get_json()
+        self.assertEqual(settings_response.status_code, 200)
+        self.assertTrue(settings_payload["provider"]["secret_configured"])
+        self.assertNotIn(secret, str(settings_payload))
+        self.assertNotIn("secret_placeholder", str(settings_payload))
+
+        settings_page = self.client.get("/ai-settings")
+        self.assertEqual(settings_page.status_code, 200)
+        self.assertNotIn(secret.encode("utf-8"), settings_page.data)
+
+        generate_response = self.client.post(
+            "/api/simulations/ai/generate",
+            json={
+                "campaign_id": campaign_id,
+                "provider_id": provider_id,
+                "scenario_goal": "Practice verifying unexpected vendor changes",
+                "audience": "Accounts payable team",
+                "channels": ["email", "sms", "voice"],
+                "tone": "plainspoken",
+                "difficulty": "standard",
+                "training_reminder": "Contact the vendor owner through the approved directory.",
+            },
+        )
+        payload = generate_response.get_json()
+
+        self.assertEqual(generate_response.status_code, 200)
+        self.assertEqual(set(payload["generation"]["channels"]), {"email", "sms", "voice"})
+        self.assertIn("Training simulation", payload["generation"]["draft"]["email_subject"])
+        self.assertIn("authorized security awareness training simulation", payload["generation"]["draft"]["email_body"].lower())
+        self.assertIn("Authorized training simulation", payload["generation"]["draft"]["sms_body"])
+        self.assertIn("authorized security awareness training simulation", payload["generation"]["draft"]["voice_script"].lower())
+        self.assertIn("credential_collection_disallowed", payload["generation"]["risk_flags"])
+        self.assertNotIn(secret, str(payload))
+        self.assertNotIn("secret_placeholder", str(payload))
+
     def test_ai_generation_api_returns_structured_errors(self):
         missing_provider = self.client.post(
             "/api/simulations/ai/generate",

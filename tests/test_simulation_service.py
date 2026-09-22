@@ -363,6 +363,54 @@ Broken Voice,,,voice,Support,Morgan
         self.assertNotIn("secret_placeholder", str(audits[0]))
         self.assertNotIn("never-store-this-secret-in-audit", str(audits[0]))
 
+    def test_generated_risk_flags_persist_to_saved_draft_history(self):
+        provider = next(
+            provider
+            for provider in list_ai_provider_settings(self.conn)
+            if provider["provider_type"] == "local"
+        )
+        request = AIScenarioRequest(
+            "Practice reporting suspicious voicemail and text requests",
+            "Operations",
+            ["sms", "voice"],
+            training_reminder="Report suspicious requests through the approved workflow.",
+        )
+
+        response = generate_ai_scenario(self.conn, provider["id"], request)
+        audit = list_ai_generation_audits(self.conn, provider_id=provider["id"])[0]
+        saved = save_ai_campaign_draft(
+            self.conn,
+            self.campaign_id,
+            {
+                "sms_body": response.draft.sms_body,
+                "voice_script": response.draft.voice_script,
+                "landing_text": response.draft.landing_text,
+                "training_text": response.draft.training_text,
+            },
+            response.channels,
+            provider={
+                "id": response.provider_id,
+                "name": response.provider_name,
+                "provider_type": response.provider_type,
+                "model_name": response.model_name,
+            },
+            risk_flags=response.risk_flags,
+            safety_notes=response.safety_notes,
+            metadata=response.metadata,
+            audit_id=audit["id"],
+        )
+        detail = get_campaign_detail(self.conn, self.campaign_id)
+
+        self.assertEqual(saved["audit_id"], audit["id"])
+        self.assertEqual(detail["ai_drafts"][0]["id"], saved["id"])
+        self.assertEqual(detail["ai_drafts"][0]["channels"], ["sms", "voice"])
+        self.assertIn("credential_collection_disallowed", detail["ai_drafts"][0]["risk_flags"])
+        self.assertIn("real_brand_impersonation_omitted", detail["ai_drafts"][0]["risk_flags"])
+        self.assertEqual(
+            detail["ai_drafts"][0]["metadata"]["artifact_label"],
+            "authorized_security_awareness_training",
+        )
+
     def test_blocked_ai_generation_attempt_is_audited(self):
         provider = next(
             provider
