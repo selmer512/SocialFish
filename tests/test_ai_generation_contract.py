@@ -1,13 +1,25 @@
 import unittest
+import sqlite3
+import tempfile
+from pathlib import Path
 
 from core.ai_generation import (
     AI_GENERATION_LABEL,
+    AIDisabledProviderError,
+    AIProviderConfigurationError,
     AIGeneratedDraft,
     AIGenerationResponse,
     AIProviderConfig,
     AIScenarioProvider,
     AIScenarioRequest,
+    LocalHTTPModelServerProvider,
+    LocalMockScenarioProvider,
+    OpenAICompatibleHTTPProvider,
+    generate_scenario_with_provider_settings,
+    provider_for_config,
 )
+from core.db_migration import migrate_db
+from core.simulation_service import generate_ai_scenario, update_ai_provider_settings
 
 
 class ContractProvider:
@@ -115,6 +127,126 @@ class AIGenerationContractTest(unittest.TestCase):
         self.assertEqual(response.channels, ("email", "sms", "voice"))
         self.assertEqual(response.draft.email_subject, "Authorized training reminder")
         self.assertIn("training_label_present", response.risk_flags)
+
+    def test_local_mock_provider_generates_deterministic_channel_drafts(self):
+        provider = LocalMockScenarioProvider()
+        request = AIScenarioRequest(
+            scenario_goal="Reinforce reporting suspicious messages",
+            audience="Finance team",
+            channels=["email", "sms", "voice"],
+            tone="calm",
+            difficulty="introductory",
+            training_reminder="Use the report button when something feels unusual.",
+        )
+        provider_config = AIProviderConfig(
+            id=3,
+            name="Local Demo Provider",
+            provider_type="local",
+            model_name="local-simulation-model",
+            enabled=True,
+        )
+
+        first = provider.generate(request, provider_config)
+        second = provider.generate(request, provider_config)
+
+        self.assertEqual(first, second)
+        self.assertIn("Training simulation", first.draft.email_subject)
+        self.assertIn("Authorized training simulation", first.draft.sms_body)
+        self.assertIn("authorized security awareness training simulation", first.draft.voice_script.lower())
+        self.assertIn("credential_collection_disallowed", first.risk_flags)
+        self.assertEqual(first.metadata["artifact_label"], AI_GENERATION_LABEL)
+
+    def test_disabled_provider_cannot_generate(self):
+        request = AIScenarioRequest("Improve reporting", "Operations", ["email"])
+        provider_config = AIProviderConfig(
+            id=4,
+            name="Disabled Local Provider",
+            provider_type="local",
+            model_name="local-simulation-model",
+            enabled=False,
+        )
+
+        with self.assertRaisesRegex(AIDisabledProviderError, "disabled"):
+            LocalMockScenarioProvider().generate(request, provider_config)
+
+    def test_http_provider_shells_validate_ui_managed_configuration(self):
+        request = AIScenarioRequest("Reduce unsafe clicks", "Support", ["email"])
+        cloud_config = AIProviderConfig(
+            id=5,
+            name="Cloud Provider",
+            provider_type="cloud",
+            model_name="awareness-gpt",
+            base_url="https://api.example.test/v1",
+            enabled=True,
+            secret_configured=True,
+        )
+        local_http_config = AIProviderConfig(
+            id=6,
+            name="Local HTTP Provider",
+            provider_type="local_http",
+            model_name="awareness-local",
+            base_url="http://localhost:11434",
+            enabled=True,
+        )
+
+        cloud_payload = OpenAICompatibleHTTPProvider().build_payload(request, cloud_config)
+        local_payload = LocalHTTPModelServerProvider().build_payload(request, local_http_config)
+
+        self.assertEqual(cloud_payload["model"], "awareness-gpt")
+        self.assertEqual(cloud_payload["response_format"], {"type": "json_object"})
+        self.assertIn("messages", cloud_payload)
+        self.assertNotIn("secret", str(cloud_payload).lower())
+        self.assertEqual(local_payload["model"], "awareness-local")
+        self.assertFalse(local_payload["stream"])
+        self.assertNotIn("api_key", str(local_payload).lower())
+
+        missing_secret_config = AIProviderConfig(
+            id=7,
+            name="Cloud Provider",
+            provider_type="cloud",
+            model_name="awareness-gpt",
+            base_url="https://api.example.test/v1",
+            enabled=True,
+            secret_configured=False,
+        )
+        with self.assertRaisesRegex(AIProviderConfigurationError, "credentials configured"):
+            OpenAICompatibleHTTPProvider().build_payload(request, missing_secret_config)
+
+    def test_provider_resolver_supports_configured_provider_shapes(self):
+        self.assertIsInstance(
+            provider_for_config(AIProviderConfig(1, "Mock", "local", "model", enabled=True)),
+            LocalMockScenarioProvider,
+        )
+        self.assertIsInstance(
+            provider_for_config(AIProviderConfig(2, "Cloud", "openai_compatible", "model", enabled=True)),
+            OpenAICompatibleHTTPProvider,
+        )
+        self.assertIsInstance(
+            provider_for_config(AIProviderConfig(3, "Local HTTP", "local_http", "model", enabled=True)),
+            LocalHTTPModelServerProvider,
+        )
+
+    def test_generation_reads_provider_settings_from_database_shape(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "ai-generation.db")
+            migrate_db(db_path)
+            conn = sqlite3.connect(db_path)
+            try:
+                provider_id = conn.execute(
+                    "SELECT id FROM ai_provider_configs WHERE provider_type = 'local'"
+                ).fetchone()[0]
+                request = AIScenarioRequest("Practice safe link review", "Engineering", ["email"])
+                response = generate_ai_scenario(conn, provider_id, request)
+
+                self.assertEqual(response.provider_type, "local")
+                self.assertIn("Practice safe link review", response.draft.email_subject)
+                self.assertNotIn("secret_placeholder", str(response))
+
+                disabled = update_ai_provider_settings(conn, provider_id, enabled=False)
+                with self.assertRaisesRegex(AIDisabledProviderError, "disabled"):
+                    generate_scenario_with_provider_settings(disabled, request)
+            finally:
+                conn.close()
 
 
 if __name__ == "__main__":

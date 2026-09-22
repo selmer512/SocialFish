@@ -1112,3 +1112,32 @@ def update_ai_provider_settings(
         )
     )
     return _provider_response(row)
+
+
+def generate_ai_scenario(conn, provider_id, request):
+    """Generate drafts using only UI-managed provider settings from the database."""
+    from core.ai_generation import generate_scenario_with_provider_settings
+
+    provider = _row_to_dict(
+        conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                provider_type,
+                model_name,
+                base_url,
+                enabled,
+                secret_placeholder,
+                description,
+                created_at,
+                updated_at
+            FROM ai_provider_configs
+            WHERE id = ?
+            """,
+            (provider_id,),
+        )
+    )
+    if not provider:
+        raise ValueError("Unknown AI provider config id: {}".format(provider_id))
+    return generate_scenario_with_provider_settings(_provider_response(provider), request)

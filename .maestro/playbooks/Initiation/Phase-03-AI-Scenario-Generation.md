@@ -12,7 +12,7 @@ This phase adds an implementation-neutral AI layer for creating authorized train
   - Define a provider-neutral response shape for email subject/body, SMS body, voice script, recommended landing/training text, and risk flags
   - Document the contract in code comments near the interface, not in a separate-only design document
 
-- [ ] Implement provider adapters:
+- [x] Implement provider adapters:
   - Add a deterministic local mock provider that produces safe training drafts without network access
   - Add configuration-ready adapter shells for OpenAI-compatible HTTP APIs and local HTTP model servers without hard-coding provider-specific secrets
   - Read provider settings only from the database/UI-managed configuration created in earlier phases

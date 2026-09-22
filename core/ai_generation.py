@@ -177,3 +177,202 @@ class AIScenarioProvider(Protocol):
 
     def generate(self, request: AIScenarioRequest, provider_config: AIProviderConfig) -> AIGenerationResponse:
         """Generate authorized awareness-training drafts from the shared contract."""
+
+
+class AIGenerationError(Exception):
+    """Base error for AI scenario generation failures."""
+
+
+class AIDisabledProviderError(AIGenerationError):
+    """Raised when a disabled provider is selected for generation."""
+
+
+class AIProviderConfigurationError(AIGenerationError):
+    """Raised when provider settings are incomplete or unavailable."""
+
+
+class AIProviderTypeError(AIGenerationError):
+    """Raised when no adapter exists for a configured provider type."""
+
+
+def _require_enabled(provider_config):
+    if not provider_config.enabled:
+        raise AIDisabledProviderError("AI provider '{}' is disabled.".format(provider_config.name))
+
+
+def _join_constraints(request):
+    if not request.safety_constraints:
+        return "Use only authorized security awareness training language."
+    return " ".join(request.safety_constraints)
+
+
+class LocalMockScenarioProvider:
+    """Deterministic offline provider for safe awareness-training drafts."""
+
+    provider_type = "local"
+
+    def generate(self, request, provider_config):
+        _require_enabled(provider_config)
+
+        topic = request.scenario_goal
+        audience = request.audience
+        tone = request.tone
+        reminder = request.training_reminder or "Pause, verify the request through an approved channel, and report concerns."
+        context_name = request.campaign_context.get("campaign_name") or request.campaign_context.get("name")
+        context_suffix = " for {}".format(context_name) if context_name else ""
+
+        draft_kwargs = {
+            "landing_text": (
+                "Authorized security awareness training{}: review the scenario, identify warning signs, "
+                "and practice reporting suspicious messages."
+            ).format(context_suffix),
+            "training_text": "{} This exercise is authorized training for {}.".format(reminder, audience),
+            "metadata": {
+                "artifact_label": AI_GENERATION_LABEL,
+                "deterministic": True,
+                "provider_shape": "local_mock",
+            },
+        }
+
+        if "email" in request.requested_channels():
+            draft_kwargs["email_subject"] = "Training simulation: {}".format(topic)
+            draft_kwargs["email_body"] = (
+                "Hello {},\n\n"
+                "This authorized security awareness training simulation focuses on {}. "
+                "The tone is {} and the difficulty is {}. No credentials or sensitive information "
+                "should be entered during this exercise.\n\n{}"
+            ).format(audience, topic, tone, request.difficulty, reminder)
+
+        if "sms" in request.requested_channels():
+            draft_kwargs["sms_body"] = (
+                "Authorized training simulation for {}: {}. Do not share credentials. {}"
+            ).format(audience, topic, reminder)
+
+        if "voice" in request.requested_channels():
+            draft_kwargs["voice_script"] = (
+                "Hello. This is an authorized security awareness training simulation for {}. "
+                "The scenario is {}. Ask the participant to verify the request, avoid sharing "
+                "credentials, and use the approved reporting process."
+            ).format(audience, topic)
+
+        return AIGenerationResponse(
+            provider_id=provider_config.id,
+            provider_name=provider_config.name,
+            provider_type=provider_config.provider_type,
+            model_name=provider_config.model_name,
+            channels=tuple(request.channels),
+            draft=AIGeneratedDraft(**draft_kwargs),
+            risk_flags=[
+                "authorized_training_label_present",
+                "credential_collection_disallowed",
+                "real_brand_impersonation_omitted",
+            ],
+            safety_notes=[
+                "Generated locally without network access.",
+                "Draft text explicitly states this is authorized security awareness training.",
+                "No provider credentials were read or returned.",
+            ],
+            metadata={
+                "artifact_label": AI_GENERATION_LABEL,
+                "provider_shape": "local_mock",
+                "safety_constraints": _join_constraints(request),
+            },
+        )
+
+
+class OpenAICompatibleHTTPProvider:
+    """Configuration-ready shell for OpenAI-compatible chat/completions APIs."""
+
+    provider_type = "cloud"
+
+    def build_payload(self, request, provider_config):
+        _require_enabled(provider_config)
+        if not provider_config.base_url:
+            raise AIProviderConfigurationError("AI provider '{}' requires a base URL.".format(provider_config.name))
+        if not provider_config.secret_configured:
+            raise AIProviderConfigurationError(
+                "AI provider '{}' requires credentials configured through the UI.".format(provider_config.name)
+            )
+        return {
+            "model": provider_config.model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Create only authorized security awareness training simulation drafts. "
+                        "Do not request credentials, impersonate real brands by default, or provide offensive instructions."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": {
+                        "scenario_goal": request.scenario_goal,
+                        "audience": request.audience,
+                        "channels": list(request.channels),
+                        "tone": request.tone,
+                        "difficulty": request.difficulty,
+                        "safety_constraints": list(request.safety_constraints),
+                        "campaign_context": request.campaign_context,
+                        "training_reminder": request.training_reminder,
+                    },
+                },
+            ],
+            "response_format": {"type": "json_object"},
+        }
+
+    def generate(self, request, provider_config):
+        self.build_payload(request, provider_config)
+        raise AIProviderConfigurationError(
+            "OpenAI-compatible HTTP generation is not enabled until UI-managed credential retrieval is implemented."
+        )
+
+
+class LocalHTTPModelServerProvider(OpenAICompatibleHTTPProvider):
+    """Configuration-ready shell for local HTTP model servers."""
+
+    provider_type = "local_http"
+
+    def build_payload(self, request, provider_config):
+        _require_enabled(provider_config)
+        if not provider_config.base_url:
+            raise AIProviderConfigurationError(
+                "Local HTTP AI provider '{}' requires a base URL.".format(provider_config.name)
+            )
+        return {
+            "model": provider_config.model_name,
+            "prompt": {
+                "scenario_goal": request.scenario_goal,
+                "audience": request.audience,
+                "channels": list(request.channels),
+                "tone": request.tone,
+                "difficulty": request.difficulty,
+                "safety_constraints": list(request.safety_constraints),
+                "campaign_context": request.campaign_context,
+                "training_reminder": request.training_reminder,
+                "artifact_label": AI_GENERATION_LABEL,
+            },
+            "stream": False,
+        }
+
+    def generate(self, request, provider_config):
+        self.build_payload(request, provider_config)
+        raise AIProviderConfigurationError(
+            "Local HTTP model generation is not enabled until response parsing is implemented for this server shape."
+        )
+
+
+def provider_for_config(provider_config):
+    provider_type = (provider_config.provider_type or "").strip().lower()
+    if provider_type in {"local", "mock", "local_mock"}:
+        return LocalMockScenarioProvider()
+    if provider_type in {"cloud", "openai", "openai_compatible", "openai-compatible"}:
+        return OpenAICompatibleHTTPProvider()
+    if provider_type in {"local_http", "local-http", "local_model", "local-model"}:
+        return LocalHTTPModelServerProvider()
+    raise AIProviderTypeError("Unsupported AI provider type: {}".format(provider_config.provider_type))
+
+
+def generate_scenario_with_provider_settings(settings, request):
+    provider_config = AIProviderConfig.from_settings(settings)
+    provider = provider_for_config(provider_config)
+    return provider.generate(request, provider_config)
