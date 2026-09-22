@@ -1,9 +1,11 @@
 import csv
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
+import hashlib
 from io import StringIO
 import json
 import re
+import secrets
 
 
 VALID_SIMULATION_CHANNELS = {"email", "sms", "voice"}
@@ -158,6 +160,10 @@ def _ai_draft_response(row):
 
 def _safe_json_dumps(value):
     return json.dumps(value or {}, sort_keys=True)
+
+
+def _content_hash(value):
+    return hashlib.sha256(_safe_json_dumps(value).encode("utf-8")).hexdigest()
 
 
 def _request_audit_payload(request):
@@ -388,6 +394,30 @@ def _delivery_provider_response(row):
     provider["secret_configured"] = provider.get("secret_placeholder") == "configured"
     provider.pop("secret_placeholder", None)
     return provider
+
+
+def _delivery_job_response(row):
+    if not row:
+        return None
+    job = dict(row)
+    job["provider_snapshot"] = _json_dict(job.get("provider_snapshot"))
+    return job
+
+
+def _message_artifact_response(row):
+    artifact = dict(row)
+    artifact["content"] = _json_dict(artifact.pop("content_json", None))
+    return artifact
+
+
+def _tracking_token_response(row):
+    return dict(row)
+
+
+def _delivery_attempt_response(row):
+    attempt = dict(row)
+    attempt["provider_response"] = _json_dict(attempt.get("provider_response"))
+    return attempt
 
 
 def _campaign_response(row):
@@ -627,6 +657,14 @@ def list_simulation_events(conn, campaign_id=None):
                 e.channel,
                 e.event_type,
                 e.delivery_status,
+                e.delivery_job_id,
+                e.delivery_attempt_id,
+                e.tracking_token_id,
+                e.provider_reference_id,
+                e.provider,
+                e.provider_event_id,
+                e.error_message,
+                e.retry_count,
                 e.occurred_at,
                 e.metadata,
                 e.created_at
@@ -1057,6 +1095,14 @@ def record_simulation_event(
     delivery_status=None,
     metadata=None,
     occurred_at=None,
+    delivery_job_id=None,
+    delivery_attempt_id=None,
+    tracking_token_id=None,
+    provider_reference_id=None,
+    provider=None,
+    provider_event_id=None,
+    error_message=None,
+    retry_count=0,
 ):
     """Record a lab/demo event and update target rollup fields when possible."""
     normalized_event = (event_type or "").strip().lower()
@@ -1097,9 +1143,11 @@ def record_simulation_event(
         """
         INSERT INTO simulation_events (
             campaign_id, target_id, channel, event_type, delivery_status,
-            occurred_at, metadata
+            delivery_job_id, delivery_attempt_id, tracking_token_id,
+            provider_reference_id, provider, provider_event_id, error_message,
+            retry_count, occurred_at, metadata
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             campaign_id,
@@ -1107,6 +1155,14 @@ def record_simulation_event(
             event_channel,
             normalized_event,
             event_status,
+            delivery_job_id,
+            delivery_attempt_id,
+            tracking_token_id,
+            provider_reference_id,
+            _normalize_text(provider),
+            _normalize_text(provider_event_id),
+            _normalize_text(error_message),
+            int(retry_count or 0),
             timestamp,
             metadata_json,
         ),
@@ -1152,6 +1208,14 @@ def get_simulation_event(conn, event_id):
                 channel,
                 event_type,
                 delivery_status,
+                delivery_job_id,
+                delivery_attempt_id,
+                tracking_token_id,
+                provider_reference_id,
+                provider,
+                provider_event_id,
+                error_message,
+                retry_count,
                 occurred_at,
                 metadata,
                 created_at
@@ -1196,6 +1260,547 @@ def list_delivery_provider_settings(conn, channel=None):
         params,
     )
     return [_delivery_provider_response(row) for row in _rows_to_dicts(cursor)]
+
+
+def _provider_for_channel(conn, channel, provider_ids=None, mode="dry_run"):
+    provider_id = None
+    if isinstance(provider_ids, dict):
+        provider_id = provider_ids.get(channel)
+    elif provider_ids:
+        provider_id = provider_ids
+
+    if provider_id:
+        provider = get_delivery_provider_settings(conn, provider_id)
+        if not provider:
+            raise ValueError("Unknown delivery provider config id: {}".format(provider_id))
+        if provider["channel"] != channel:
+            raise ValueError("Provider '{}' is not configured for {} delivery.".format(provider["provider_name"], channel))
+        return provider
+
+    providers = list_delivery_provider_settings(conn, channel=channel)
+    if mode == "dry_run":
+        for provider in providers:
+            if provider["provider_type"] == "dry_run" and provider["enabled"]:
+                return provider
+    for provider in providers:
+        if provider["enabled"]:
+            return provider
+    raise ValueError("No enabled {} delivery provider is configured.".format(channel))
+
+
+def _latest_campaign_draft(conn, campaign_id):
+    return _row_to_dict(
+        conn.execute(
+            """
+            SELECT email_subject, email_body, sms_body, voice_script, landing_text,
+                   training_text, channels, metadata
+            FROM ai_campaign_drafts
+            WHERE campaign_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (campaign_id,),
+        )
+    )
+
+
+def _message_for_channel(campaign, draft, channel):
+    draft = draft or {}
+    training_text = _normalize_text(draft.get("training_text")) or _normalize_text(campaign.get("training_url"))
+    if channel == "email":
+        subject = _normalize_text(draft.get("email_subject")) or "Authorized security awareness training"
+        body = _normalize_text(draft.get("email_body")) or (
+            "This is an authorized security awareness training simulation for {}.".format(campaign["name"])
+        )
+    elif channel == "sms":
+        subject = None
+        body = _normalize_text(draft.get("sms_body")) or (
+            "Authorized security awareness training simulation: {}".format(campaign["name"])
+        )
+    else:
+        subject = None
+        body = _normalize_text(draft.get("voice_script")) or (
+            "This is an authorized security awareness training simulation call for {}.".format(campaign["name"])
+        )
+    return {
+        "channel": channel,
+        "subject": subject,
+        "body": body,
+        "content": {
+            "campaign_name": campaign["name"],
+            "landing_url": campaign.get("landing_url"),
+            "training_url": campaign.get("training_url"),
+            "training_text": training_text,
+        },
+    }
+
+
+def build_delivery_preview(conn, campaign_id, provider_ids=None, mode="dry_run"):
+    """Build a delivery preview from active campaign targets without creating records."""
+    campaign = get_campaign(conn, campaign_id)
+    if not campaign:
+        raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
+
+    targets = [target for target in list_targets(conn, campaign_id) if target["active"]]
+    draft = _latest_campaign_draft(conn, campaign_id)
+    channels = sorted({target["channel"] for target in targets})
+    providers = {channel: _provider_for_channel(conn, channel, provider_ids, mode) for channel in channels}
+    messages = {channel: _message_for_channel(campaign, draft, channel) for channel in channels}
+    return {
+        "campaign": campaign,
+        "targets": targets,
+        "providers": providers,
+        "messages": messages,
+        "total_targets": len(targets),
+        "total_attempts": len(targets),
+        "mode": mode,
+    }
+
+
+def _create_message_artifacts(conn, campaign_id, job_id, messages):
+    artifacts = {}
+    now = _utc_now()
+    for channel, message in messages.items():
+        content = dict(message.get("content") or {})
+        content["channel"] = channel
+        content_hash = _content_hash(
+            {
+                "subject": message.get("subject"),
+                "body": message.get("body"),
+                "content": content,
+            }
+        )
+        existing = _row_to_dict(
+            conn.execute(
+                """
+                SELECT *
+                FROM simulation_message_artifacts
+                WHERE delivery_job_id = ? AND channel = ? AND content_hash = ?
+                """,
+                (job_id, channel, content_hash),
+            )
+        )
+        if existing:
+            artifacts[channel] = _message_artifact_response(existing)
+            continue
+        cursor = conn.execute(
+            """
+            INSERT INTO simulation_message_artifacts (
+                campaign_id, delivery_job_id, channel, artifact_type, subject,
+                body, content_json, content_hash, created_at, updated_at
+            )
+            VALUES (?, ?, ?, 'message', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                campaign_id,
+                job_id,
+                channel,
+                message.get("subject"),
+                message.get("body"),
+                _safe_json_dumps(content),
+                content_hash,
+                now,
+                now,
+            ),
+        )
+        artifacts[channel] = get_message_artifact(conn, cursor.lastrowid)
+    return artifacts
+
+
+def _token_value():
+    return secrets.token_urlsafe(24)
+
+
+def _ensure_tracking_tokens(conn, campaign_id, job_id, target, artifact_id):
+    tokens = []
+    now = _utc_now()
+    token_types = ("open", "link", "attachment")
+    for token_type in token_types:
+        existing = _row_to_dict(
+            conn.execute(
+                """
+                SELECT *
+                FROM simulation_tracking_tokens
+                WHERE campaign_id = ? AND target_id = ? AND delivery_job_id = ?
+                  AND message_artifact_id = ? AND token_type = ?
+                """,
+                (campaign_id, target["id"], job_id, artifact_id, token_type),
+            )
+        )
+        if existing:
+            tokens.append(_tracking_token_response(existing))
+            continue
+        destination_url = None
+        if token_type == "link":
+            campaign = get_campaign(conn, campaign_id)
+            destination_url = campaign.get("training_url") or campaign.get("landing_url")
+        cursor = conn.execute(
+            """
+            INSERT INTO simulation_tracking_tokens (
+                campaign_id, target_id, delivery_job_id, message_artifact_id,
+                channel, token, token_type, destination_url, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                campaign_id,
+                target["id"],
+                job_id,
+                artifact_id,
+                target["channel"],
+                _token_value(),
+                token_type,
+                destination_url,
+                now,
+                now,
+            ),
+        )
+        tokens.append(get_tracking_token(conn, cursor.lastrowid))
+    return tokens
+
+
+def create_delivery_job_from_campaign(
+    conn,
+    campaign_id,
+    provider_ids=None,
+    mode="dry_run",
+    requested_by=None,
+    max_retries=0,
+):
+    """Create a delivery job, artifacts, tracking tokens, and per-target attempts."""
+    preview = build_delivery_preview(conn, campaign_id, provider_ids=provider_ids, mode=mode)
+    if not preview["targets"]:
+        raise ValueError("Campaign has no active targets to deliver.")
+
+    now = _utc_now()
+    provider_snapshot = {
+        channel: {
+            "id": provider["id"],
+            "provider_key": provider["provider_key"],
+            "provider_name": provider["provider_name"],
+            "provider_type": provider["provider_type"],
+            "enabled": provider["enabled"],
+        }
+        for channel, provider in preview["providers"].items()
+    }
+    cursor = conn.execute(
+        """
+        INSERT INTO simulation_delivery_jobs (
+            campaign_id, status, mode, requested_by, provider_snapshot,
+            total_targets, total_attempts, queued_count, queued_at, created_at, updated_at
+        )
+        VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            campaign_id,
+            _normalize_text(mode) or "dry_run",
+            _normalize_text(requested_by),
+            _safe_json_dumps(provider_snapshot),
+            preview["total_targets"],
+            preview["total_attempts"],
+            preview["total_attempts"],
+            now,
+            now,
+            now,
+        ),
+    )
+    job_id = cursor.lastrowid
+    artifacts = _create_message_artifacts(conn, campaign_id, job_id, preview["messages"])
+
+    for target in preview["targets"]:
+        channel = target["channel"]
+        artifact = artifacts[channel]
+        provider = preview["providers"][channel]
+        _ensure_tracking_tokens(conn, campaign_id, job_id, target, artifact["id"])
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO simulation_delivery_attempts (
+                delivery_job_id, campaign_id, target_id, message_artifact_id,
+                provider_id, channel, status, max_retries, queued_at,
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)
+            """,
+            (
+                job_id,
+                campaign_id,
+                target["id"],
+                artifact["id"],
+                provider["id"],
+                channel,
+                int(max_retries or 0),
+                now,
+                now,
+                now,
+            ),
+        )
+        record_simulation_event(
+            conn,
+            campaign_id,
+            "queued",
+            target_id=target["id"],
+            channel=channel,
+            delivery_job_id=job_id,
+            provider_reference_id=provider["id"],
+            metadata={"delivery_job_id": job_id, "provider_key": provider["provider_key"]},
+        )
+
+    conn.commit()
+    return get_delivery_job_status(conn, job_id)
+
+
+def get_message_artifact(conn, artifact_id):
+    row = _row_to_dict(conn.execute("SELECT * FROM simulation_message_artifacts WHERE id = ?", (artifact_id,)))
+    return _message_artifact_response(row) if row else None
+
+
+def get_tracking_token(conn, token_id):
+    row = _row_to_dict(conn.execute("SELECT * FROM simulation_tracking_tokens WHERE id = ?", (token_id,)))
+    return _tracking_token_response(row) if row else None
+
+
+def get_delivery_job(conn, job_id):
+    row = _row_to_dict(conn.execute("SELECT * FROM simulation_delivery_jobs WHERE id = ?", (job_id,)))
+    return _delivery_job_response(row)
+
+
+def list_delivery_attempts(conn, job_id):
+    rows = _rows_to_dicts(
+        conn.execute(
+            """
+            SELECT
+                a.*,
+                t.name AS target_name,
+                t.display_name AS target_display_name,
+                t.email AS target_email,
+                t.phone AS target_phone,
+                p.provider_key,
+                p.provider_name,
+                p.provider_type
+            FROM simulation_delivery_attempts a
+            JOIN simulation_targets t ON t.id = a.target_id
+            LEFT JOIN simulation_channel_providers p ON p.id = a.provider_id
+            WHERE a.delivery_job_id = ?
+            ORDER BY a.id ASC
+            """,
+            (job_id,),
+        )
+    )
+    return [_delivery_attempt_response(row) for row in rows]
+
+
+def list_tracking_tokens_for_job(conn, job_id):
+    rows = _rows_to_dicts(
+        conn.execute(
+            """
+            SELECT *
+            FROM simulation_tracking_tokens
+            WHERE delivery_job_id = ?
+            ORDER BY target_id ASC, token_type ASC
+            """,
+            (job_id,),
+        )
+    )
+    return [_tracking_token_response(row) for row in rows]
+
+
+def _refresh_delivery_job_counts(conn, job_id):
+    now = _utc_now()
+    counts = _row_to_dict(
+        conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total_attempts,
+                SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued_count,
+                SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent_count,
+                SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS delivered_count,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+                SUM(retry_count) AS retry_count
+            FROM simulation_delivery_attempts
+            WHERE delivery_job_id = ?
+            """,
+            (job_id,),
+        )
+    )
+    total = int(counts.get("total_attempts") or 0)
+    failed = int(counts.get("failed_count") or 0)
+    queued = int(counts.get("queued_count") or 0)
+    delivered = int(counts.get("delivered_count") or 0)
+    sent = int(counts.get("sent_count") or 0)
+    status = "queued" if queued == total else "completed"
+    if failed and queued == 0 and delivered + sent + failed == total:
+        status = "completed_with_errors"
+    completed_at = now if status.startswith("completed") else None
+    conn.execute(
+        """
+        UPDATE simulation_delivery_jobs
+        SET total_attempts = ?, queued_count = ?, sent_count = ?,
+            delivered_count = ?, failed_count = ?, retry_count = ?,
+            status = ?, completed_at = COALESCE(completed_at, ?), updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            total,
+            queued,
+            sent,
+            delivered,
+            failed,
+            int(counts.get("retry_count") or 0),
+            status,
+            completed_at,
+            now,
+            job_id,
+        ),
+    )
+    conn.commit()
+
+
+def _attempt_request(conn, attempt):
+    from core.delivery_adapters import DeliveryAttemptRequest, DeliveryMessage, DeliveryRecipient
+
+    artifact = get_message_artifact(conn, attempt["message_artifact_id"])
+    target = get_target(conn, attempt["target_id"])
+    message = DeliveryMessage(
+        channel=attempt["channel"],
+        subject=artifact.get("subject") if artifact else None,
+        body=artifact.get("body") if artifact else None,
+        content=artifact.get("content") if artifact else {},
+    )
+    recipient = DeliveryRecipient(
+        target_id=target["id"],
+        name=target.get("display_name") or target["name"],
+        email=target.get("email"),
+        phone=target.get("phone"),
+    )
+    return DeliveryAttemptRequest(
+        campaign_id=attempt["campaign_id"],
+        target_id=attempt["target_id"],
+        channel=attempt["channel"],
+        message=message,
+        recipient=recipient,
+        delivery_job_id=attempt["delivery_job_id"],
+        attempt_id=attempt["id"],
+        metadata={"retry_count": attempt.get("retry_count") or 0},
+    )
+
+
+def run_delivery_job(conn, job_id):
+    """Process queued/retryable delivery attempts while skipping completed attempts."""
+    from core.delivery_adapters import DeliveryProviderError, send_with_provider_settings
+
+    job = get_delivery_job(conn, job_id)
+    if not job:
+        raise ValueError("Unknown delivery job id: {}".format(job_id))
+
+    now = _utc_now()
+    conn.execute(
+        """
+        UPDATE simulation_delivery_jobs
+        SET status = 'running', started_at = COALESCE(started_at, ?), updated_at = ?
+        WHERE id = ?
+        """,
+        (now, now, job_id),
+    )
+    conn.commit()
+
+    processed = []
+    for attempt in list_delivery_attempts(conn, job_id):
+        if attempt["status"] in {"sent", "delivered"}:
+            continue
+        if attempt["status"] == "failed" and int(attempt.get("retry_count") or 0) >= int(attempt.get("max_retries") or 0):
+            continue
+
+        provider = get_delivery_provider_settings(conn, attempt["provider_id"])
+        request = _attempt_request(conn, attempt)
+        retry_count = int(attempt.get("retry_count") or 0)
+        if attempt["status"] == "failed":
+            retry_count += 1
+        try:
+            result = send_with_provider_settings(provider, request)
+            timestamp = _utc_now()
+            status = result.status
+            conn.execute(
+                """
+                UPDATE simulation_delivery_attempts
+                SET status = ?, provider = ?, provider_message_id = ?,
+                    provider_response = ?, error_message = NULL, retry_count = ?,
+                    sent_at = COALESCE(sent_at, ?),
+                    delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END,
+                    failed_at = NULL, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    result.provider,
+                    result.provider_message_id,
+                    _safe_json_dumps(result.provider_response),
+                    retry_count,
+                    timestamp,
+                    status,
+                    timestamp,
+                    timestamp,
+                    attempt["id"],
+                ),
+            )
+            event = record_simulation_event(
+                conn,
+                attempt["campaign_id"],
+                result.event_type,
+                target_id=attempt["target_id"],
+                channel=attempt["channel"],
+                delivery_status=status,
+                delivery_job_id=job_id,
+                delivery_attempt_id=attempt["id"],
+                provider_reference_id=attempt["provider_id"],
+                provider=result.provider,
+                provider_event_id=result.provider_message_id,
+                retry_count=retry_count,
+                metadata=result.event_metadata,
+            )
+            processed.append({"attempt_id": attempt["id"], "status": status, "event": event})
+        except DeliveryProviderError as exc:
+            timestamp = _utc_now()
+            error_message = str(exc)
+            conn.execute(
+                """
+                UPDATE simulation_delivery_attempts
+                SET status = 'failed', error_message = ?, retry_count = ?,
+                    failed_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (error_message, retry_count, timestamp, timestamp, attempt["id"]),
+            )
+            event = record_simulation_event(
+                conn,
+                attempt["campaign_id"],
+                "failed",
+                target_id=attempt["target_id"],
+                channel=attempt["channel"],
+                delivery_status="failed",
+                delivery_job_id=job_id,
+                delivery_attempt_id=attempt["id"],
+                provider_reference_id=attempt["provider_id"],
+                error_message=error_message,
+                retry_count=retry_count,
+                metadata={"error_message": error_message},
+            )
+            processed.append({"attempt_id": attempt["id"], "status": "failed", "event": event})
+
+    _refresh_delivery_job_counts(conn, job_id)
+    status = get_delivery_job_status(conn, job_id)
+    status["processed_attempts"] = processed
+    return status
+
+
+def get_delivery_job_status(conn, job_id):
+    job = get_delivery_job(conn, job_id)
+    if not job:
+        raise ValueError("Unknown delivery job id: {}".format(job_id))
+    return {
+        "job": job,
+        "attempts": list_delivery_attempts(conn, job_id),
+        "tracking_tokens": list_tracking_tokens_for_job(conn, job_id),
+    }
 
 
 def get_delivery_provider_settings(conn, provider_id):

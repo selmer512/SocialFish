@@ -38,11 +38,17 @@ This phase adds simulation delivery orchestration and event tracking for email, 
   - Added delivery provider settings helpers in `core/simulation_service.py` that redact secret placeholders while preserving enabled state, required settings, and UI-managed configuration.
   - Verified dry-run behavior and provider safety checks with `python -m unittest discover tests`.
 
-- [ ] Implement delivery orchestration services:
+- [x] Implement delivery orchestration services:
   - Add functions to create delivery jobs from campaigns and active targets
   - Generate per-target tracking tokens for links and attachments
   - Queue per-channel attempts and record provider results
   - Add retry-safe logic so re-running a job does not duplicate completed attempts
+
+  Completed 2026-09-22:
+  - Added delivery preview, job creation, job status, and job execution service functions in `core/simulation_service.py`.
+  - Delivery jobs now create per-channel message artifacts, per-target open/link/attachment tracking tokens, queued attempts, and delivery events with provider metadata.
+  - Dry-run provider execution records provider responses and updates job/target rollups while skipping already delivered attempts on rerun.
+  - Verified with focused orchestration tests and `python -m unittest discover tests`.
 
 - [ ] Add authenticated delivery routes:
   - `POST /simulations/campaigns/<id>/deliveries/preview` builds a delivery preview from current campaign content and targets

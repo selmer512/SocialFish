@@ -8,10 +8,13 @@ from core.ai_generation import AIContentPolicyError, AIScenarioRequest
 from core.simulation_service import (
     archive_campaign,
     archive_target,
+    build_delivery_preview,
     create_campaign,
+    create_delivery_job_from_campaign,
     create_target,
     get_campaign_detail,
     get_campaign_metrics,
+    get_delivery_job_status,
     import_targets_csv,
     generate_ai_scenario,
     list_ai_generation_audits,
@@ -21,6 +24,7 @@ from core.simulation_service import (
     list_targets,
     parse_target_csv,
     record_simulation_event,
+    run_delivery_job,
     save_ai_campaign_draft,
     update_campaign,
     update_ai_provider_settings,
@@ -481,6 +485,69 @@ Broken Voice,,,voice,Support,Morgan
         self.assertIsNone(audits[0]["output"])
         self.assertIn("credential_harvesting_request", audits[0]["risk_flags"])
         self.assertIn("blocked by safety guardrails", audits[0]["error_reason"])
+
+    def test_delivery_preview_uses_active_targets_messages_and_providers(self):
+        preview = build_delivery_preview(self.conn, self.campaign_id)
+
+        self.assertEqual(preview["total_targets"], 4)
+        self.assertEqual(preview["total_attempts"], 4)
+        self.assertEqual(set(preview["providers"].keys()), {"email", "sms", "voice"})
+        self.assertEqual(preview["providers"]["email"]["provider_key"], "dry_run_email")
+        self.assertIn("Authorized", preview["messages"]["email"]["subject"])
+
+    def test_creates_and_runs_dry_run_delivery_job_for_all_channels(self):
+        created = create_delivery_job_from_campaign(
+            self.conn,
+            self.campaign_id,
+            requested_by="unit-test",
+        )
+        job_id = created["job"]["id"]
+
+        self.assertEqual(created["job"]["status"], "queued")
+        self.assertEqual(len(created["attempts"]), 4)
+        self.assertEqual(len(created["tracking_tokens"]), 12)
+        self.assertEqual(
+            {token["token_type"] for token in created["tracking_tokens"]},
+            {"attachment", "link", "open"},
+        )
+
+        completed = run_delivery_job(self.conn, job_id)
+
+        self.assertEqual(completed["job"]["status"], "completed")
+        self.assertEqual(completed["job"]["delivered_count"], 4)
+        self.assertEqual(completed["job"]["failed_count"], 0)
+        self.assertEqual(len(completed["processed_attempts"]), 4)
+        self.assertTrue(all(attempt["status"] == "delivered" for attempt in completed["attempts"]))
+        self.assertTrue(all(attempt["provider_response"]["dry_run"] for attempt in completed["attempts"]))
+
+        delivered_events = [
+            event for event in list_simulation_events(self.conn, self.campaign_id)
+            if event["delivery_job_id"] == job_id and event["event_type"] == "delivered"
+        ]
+        self.assertEqual(len(delivered_events), 4)
+        self.assertTrue(all(event["provider_reference_id"] for event in delivered_events))
+
+    def test_rerunning_completed_delivery_job_does_not_duplicate_attempts_or_events(self):
+        created = create_delivery_job_from_campaign(self.conn, self.campaign_id)
+        job_id = created["job"]["id"]
+        first_run = run_delivery_job(self.conn, job_id)
+        second_run = run_delivery_job(self.conn, job_id)
+
+        self.assertEqual(len(second_run["processed_attempts"]), 0)
+        self.assertEqual(len(second_run["attempts"]), len(first_run["attempts"]))
+        delivered_event_count = self.conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM simulation_events
+            WHERE delivery_job_id = ? AND event_type = 'delivered'
+            """,
+            (job_id,),
+        ).fetchone()[0]
+        self.assertEqual(delivered_event_count, 4)
+
+        status = get_delivery_job_status(self.conn, job_id)
+        self.assertEqual(status["job"]["delivered_count"], 4)
+        self.assertEqual(len(status["tracking_tokens"]), 12)
 
 
 if __name__ == "__main__":
