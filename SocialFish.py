@@ -197,6 +197,54 @@ def _simulation_metric_filters(active_campaigns_only=False):
     return filters
 
 
+def _metric_filter_options(conn):
+    departments = [
+        row[0]
+        for row in conn.execute(
+            """
+            SELECT DISTINCT COALESCE(NULLIF(TRIM(department), ''), 'Unassigned') AS department
+            FROM simulation_targets
+            ORDER BY department ASC
+            """
+        ).fetchall()
+    ]
+    delivery_statuses = [
+        row[0]
+        for row in conn.execute(
+            """
+            SELECT DISTINCT delivery_status
+            FROM simulation_targets
+            WHERE delivery_status IS NOT NULL AND TRIM(delivery_status) != ''
+            ORDER BY delivery_status ASC
+            """
+        ).fetchall()
+    ]
+    return {
+        "channels": ("email", "sms", "voice"),
+        "departments": departments,
+        "delivery_statuses": delivery_statuses,
+    }
+
+
+def _target_risk_score(target):
+    return (
+        int(target.get("link_clicked") or 0) * 5
+        + int(target.get("attachment_opened") or 0) * 4
+        + int(target.get("voice_responses") or 0) * 4
+        + int(target.get("opened") or 0) * 2
+        + int(target.get("forwarded") or 0) * 2
+        + int(target.get("failed") or 0)
+    )
+
+
+def _risk_level(score):
+    if score >= 5:
+        return "High"
+    if score >= 2:
+        return "Medium"
+    return "Low"
+
+
 def _form_bool(value):
     if value is None:
         return None
@@ -576,6 +624,57 @@ def simulations_dashboard():
         metrics=metrics,
         targets=targets,
     )
+
+
+@app.route("/simulations/metrics", methods=['GET'])
+@flask_login.login_required
+def simulation_metrics_dashboard():
+    try:
+        campaigns = list_campaigns(g.db)
+        selected_campaign_id = _optional_int(request.args.get("campaign_id"))
+        filters = _simulation_metric_filters(active_campaigns_only=selected_campaign_id is None)
+        metrics = get_campaign_metrics(g.db, selected_campaign_id, filters)
+        campaign_rows = []
+        for campaign in campaigns:
+            campaign_filters = _simulation_metric_filters()
+            campaign_metrics = get_campaign_metrics(g.db, campaign["id"], campaign_filters)["aggregate"]
+            campaign_rows.append({
+                "campaign": campaign,
+                "metrics": campaign_metrics,
+            })
+
+        risk_rows = []
+        for target in metrics["targets"]:
+            score = _target_risk_score(target)
+            risk_rows.append({
+                "target": target,
+                "score": score,
+                "level": _risk_level(score),
+            })
+        risk_rows.sort(key=lambda row: (-row["score"], row["target"].get("display_name") or ""))
+
+        return render_template(
+            'admin/simulation_metrics.html',
+            campaigns=campaigns,
+            selected_campaign_id=selected_campaign_id,
+            metrics=metrics,
+            campaign_rows=campaign_rows,
+            risk_rows=risk_rows[:25],
+            filter_options=_metric_filter_options(g.db),
+            filters=filters,
+        )
+    except (TypeError, ValueError) as e:
+        flash(str(e), "danger")
+        return render_template(
+            'admin/simulation_metrics.html',
+            campaigns=list_campaigns(g.db),
+            selected_campaign_id=None,
+            metrics=get_campaign_metrics(g.db, filters={"active_campaigns_only": True}),
+            campaign_rows=[],
+            risk_rows=[],
+            filter_options=_metric_filter_options(g.db),
+            filters={},
+        ), 400
 
 
 @app.route("/simulations/campaigns", methods=['GET'])

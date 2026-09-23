@@ -30,11 +30,17 @@ This phase modernizes reporting so the Cybersecurity Team can understand campaig
   - Extended normalized metrics helpers with optional channel, date range, department, delivery status, and active-campaign filters while preserving the existing `/api/simulations/metrics` default behavior.
   - Added route coverage for filtered campaign/target/overview metrics and invalid channel filter errors.
 
-- [ ] Build the metrics dashboard UI:
+- [x] Build the metrics dashboard UI:
   - Add a Simulation Metrics page available from the admin navigation
   - Show portfolio summary cards, channel comparison tables, campaign trend tables, and target risk summaries
   - Add filters for campaign, channel, date range, department, and delivery status
   - Use existing Bootstrap and static conventions without introducing a disconnected frontend stack
+
+  Completion notes, 2026-09-23:
+  - Added a server-rendered `/simulations/metrics` dashboard using the existing Flask, Bootstrap, and Jinja conventions.
+  - Wired Simulation Metrics into the admin easy-access buttons and Simulation Center actions.
+  - Added portfolio summary cards, channel comparison, campaign trend, department summary, and target risk tables with campaign, channel, date range, department, and delivery status filters.
+  - Added route coverage for the dashboard shell and filtered campaign reporting render.
 
 - [ ] Enhance campaign detail reporting:
   - Add a metrics tab or section to campaign detail pages

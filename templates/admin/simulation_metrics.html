@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>SocialFish Simulation Metrics</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqiyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/simulations"><i class="fas fa-arrow-left"></i> <strong>SocialFish</strong></a>/Simulation Metrics
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    <strong>Authorized internal training simulations only.</strong>
+                    Metrics are normalized across email, SMS, and voice events for approved awareness reporting.
+                </div>
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }}" role="alert">{{ message }}</div>
+                {% endfor %}
+                {% endwith %}
+
+                <div class="row">
+                    <div class="col-md-8">
+                        <h3 class="title-5 m-b-35">Simulation Metrics</h3>
+                        <p class="form-text text-muted">
+                            {% if selected_campaign_id %}
+                            Campaign-level reporting with shared filters applied.
+                            {% else %}
+                            Portfolio reporting across active campaigns with shared filters applied.
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-secondary btn-sm" href="/api/simulations/metrics/overview" target="_blank" rel="nofollow">
+                            <i class="fas fa-code"></i>&nbsp; Overview JSON
+                        </a>
+                    </div>
+                </div>
+
+                <form action="/simulations/metrics" method="GET" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 24px;">
+                    <h5 class="mb-3"><i class="fas fa-filter"></i> Filters</h5>
+                    <div class="row">
+                        <div class="col-md-4 form-group">
+                            <label class="form-control-label">Campaign</label>
+                            <select name="campaign_id" class="form-control">
+                                <option value="">Active portfolio</option>
+                                {% for campaign in campaigns %}
+                                <option value="{{ campaign.id }}" {% if selected_campaign_id == campaign.id %}selected{% endif %}>{{ campaign.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4 form-group">
+                            <label class="form-control-label">Channel</label>
+                            <select name="channel" class="form-control">
+                                <option value="">All channels</option>
+                                {% for channel in filter_options.channels %}
+                                <option value="{{ channel }}" {% if filters.channels and channel in filters.channels %}selected{% endif %}>{{ channel|upper }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4 form-group">
+                            <label class="form-control-label">Department</label>
+                            <select name="department" class="form-control">
+                                <option value="">All departments</option>
+                                {% for department in filter_options.departments %}
+                                <option value="{{ department }}" {% if filters.department == department %}selected{% endif %}>{{ department }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-3 form-group">
+                            <label class="form-control-label">Start Date</label>
+                            <input type="date" name="start_date" value="{{ filters.start_date or '' }}" class="form-control">
+                        </div>
+                        <div class="col-md-3 form-group">
+                            <label class="form-control-label">End Date</label>
+                            <input type="date" name="end_date" value="{{ filters.end_date or '' }}" class="form-control">
+                        </div>
+                        <div class="col-md-3 form-group">
+                            <label class="form-control-label">Delivery Status</label>
+                            <select name="delivery_status" class="form-control">
+                                <option value="">All statuses</option>
+                                {% for status in filter_options.delivery_statuses %}
+                                <option value="{{ status }}" {% if filters.delivery_status == status %}selected{% endif %}>{{ status|title }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3 form-group" style="padding-top: 32px; text-align: right;">
+                            <a class="btn btn-outline-secondary btn-sm" href="/simulations/metrics">Clear</a>
+                            <button type="submit" class="btn btn-primary btn-sm">
+                                <i class="fas fa-search"></i> Apply
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                <h4 class="mb-3">Portfolio Summary</h4>
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="statistic__item statistic__item--blue">
+                            <h2 class="number">{{ metrics.aggregate.total_targets }}</h2>
+                            <span class="desc">targets</span>
+                            <div class="icon"><i class="fas fa-users"></i></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="statistic__item statistic__item--green">
+                            <h2 class="number">{{ metrics.aggregate.delivered }}</h2>
+                            <span class="desc">delivered</span>
+                            <div class="icon"><i class="fas fa-paper-plane"></i></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="statistic__item statistic__item--orange">
+                            <h2 class="number">{{ metrics.aggregate.opened }}</h2>
+                            <span class="desc">opened</span>
+                            <div class="icon"><i class="fas fa-envelope-open"></i></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="statistic__item statistic__item--red">
+                            <h2 class="number">{{ metrics.aggregate.link_clicked }}</h2>
+                            <span class="desc">clicked</span>
+                            <div class="icon"><i class="fas fa-mouse-pointer"></i></div>
+                        </div>
+                    </div>
+                </div>
+
+                <hr>
+                <h4 class="mb-3">Channel Comparison</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr>
+                                <th>Channel</th>
+                                <th>Targets</th>
+                                <th>Queued</th>
+                                <th>Sent</th>
+                                <th>Delivered</th>
+                                <th>Failed</th>
+                                <th>Opened</th>
+                                <th>Forwarded</th>
+                                <th>Deleted</th>
+                                <th>Clicked</th>
+                                <th>Attachment</th>
+                                <th>Voice</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for channel, channel_metrics in metrics.channels.items() %}
+                            <tr class="tr-shadow">
+                                <td><span class="badge badge-secondary">{{ channel|upper }}</span></td>
+                                <td>{{ channel_metrics.total_targets }}</td>
+                                <td>{{ channel_metrics.queued }}</td>
+                                <td>{{ channel_metrics.sent }}</td>
+                                <td>{{ channel_metrics.delivered }} <small>({{ (channel_metrics.delivered_rate * 100)|round(1) }}%)</small></td>
+                                <td>{{ channel_metrics.failed }}</td>
+                                <td>{{ channel_metrics.opened }} <small>({{ (channel_metrics.opened_rate * 100)|round(1) }}%)</small></td>
+                                <td>{{ channel_metrics.forwarded }}</td>
+                                <td>{{ channel_metrics.deleted }}</td>
+                                <td>{{ channel_metrics.link_clicked }} <small>({{ (channel_metrics.link_clicked_rate * 100)|round(1) }}%)</small></td>
+                                <td>{{ channel_metrics.attachment_opened }}</td>
+                                <td>{{ channel_metrics.voice_responses }}</td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="12">No channel metrics match the current filters.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <hr>
+                <h4 class="mb-3">Campaign Trends</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr>
+                                <th>Campaign</th>
+                                <th>Status</th>
+                                <th>Window</th>
+                                <th>Targets</th>
+                                <th>Delivered</th>
+                                <th>Opened</th>
+                                <th>Clicked</th>
+                                <th>Voice</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in campaign_rows %}
+                            <tr class="tr-shadow">
+                                <td>
+                                    <a href="/simulations/campaigns/{{ row.campaign.id }}">{{ row.campaign.name }}</a>
+                                    <br>
+                                    <small class="form-text text-muted">{{ row.campaign.objective or row.campaign.description or "No objective recorded." }}</small>
+                                </td>
+                                <td><span class="badge badge-info">{{ row.campaign.status }}</span></td>
+                                <td>{{ row.campaign.start_date or "unscheduled" }} to {{ row.campaign.end_date or "unscheduled" }}</td>
+                                <td>{{ row.metrics.total_targets }}</td>
+                                <td>{{ row.metrics.delivered }} <small>({{ (row.metrics.delivered_rate * 100)|round(1) }}%)</small></td>
+                                <td>{{ row.metrics.opened }} <small>({{ (row.metrics.opened_rate * 100)|round(1) }}%)</small></td>
+                                <td>{{ row.metrics.link_clicked }} <small>({{ (row.metrics.link_clicked_rate * 100)|round(1) }}%)</small></td>
+                                <td>{{ row.metrics.voice_responses }}</td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="8">No campaigns are available for trend reporting.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <hr>
+                <h4 class="mb-3">Department Summary</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr><th>Department</th><th>Targets</th><th>Delivered</th><th>Opened</th><th>Clicked</th><th>Attachment</th><th>Voice</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for department, department_metrics in metrics.departments.items() %}
+                            <tr class="tr-shadow">
+                                <td>{{ department }}</td>
+                                <td>{{ department_metrics.total_targets }}</td>
+                                <td>{{ department_metrics.delivered }}</td>
+                                <td>{{ department_metrics.opened }}</td>
+                                <td>{{ department_metrics.link_clicked }}</td>
+                                <td>{{ department_metrics.attachment_opened }}</td>
+                                <td>{{ department_metrics.voice_responses }}</td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="7">No department metrics match the current filters.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <hr>
+                <h4 class="mb-3">Target Risk Summary</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr>
+                                <th>Target</th>
+                                <th>Campaign</th>
+                                <th>Department</th>
+                                <th>Channel</th>
+                                <th>Status</th>
+                                <th>Risk</th>
+                                <th>Activity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in risk_rows %}
+                            {% set target = row.target %}
+                            <tr class="tr-shadow">
+                                <td>
+                                    {{ target.display_name or target.name }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ target.email or target.phone or "No contact recorded" }}</small>
+                                </td>
+                                <td><a href="/simulations/campaigns/{{ target.campaign_id }}">{{ target.campaign_name }}</a></td>
+                                <td>{{ target.department or "Unassigned" }}</td>
+                                <td><span class="badge badge-secondary">{{ target.channel|upper }}</span></td>
+                                <td>{{ target.delivery_status }}</td>
+                                <td>
+                                    {% if row.level == "High" %}
+                                    <span class="badge badge-danger">{{ row.level }}</span>
+                                    {% elif row.level == "Medium" %}
+                                    <span class="badge badge-warning">{{ row.level }}</span>
+                                    {% else %}
+                                    <span class="badge badge-secondary">{{ row.level }}</span>
+                                    {% endif %}
+                                    <br>
+                                    <small class="form-text text-muted">Score {{ row.score }}</small>
+                                </td>
+                                <td>
+                                    <span class="badge badge-light">opened {{ target.opened }}</span>
+                                    <span class="badge badge-light">clicked {{ target.link_clicked }}</span>
+                                    <span class="badge badge-light">attachment {{ target.attachment_opened }}</span>
+                                    <span class="badge badge-light">voice {{ target.voice_responses }}</span>
+                                </td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="7">No target metrics match the current filters.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>

@@ -85,6 +85,7 @@ class SimulationRoutesTest(unittest.TestCase):
 
     def test_authenticated_pages_render(self):
         simulations = self.client.get("/simulations")
+        metrics_dashboard = self.client.get("/simulations/metrics")
         campaigns = self.client.get("/simulations/campaigns")
         new_campaign = self.client.get("/simulations/campaigns/new")
         ai_settings = self.client.get("/ai-settings")
@@ -93,12 +94,23 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(simulations.status_code, 200)
         self.assertIn(b"Authorized internal training simulations only", simulations.data)
         self.assertIn(b"Simulation Center", simulations.data)
+        self.assertIn(b"/simulations/metrics", simulations.data)
         self.assertIn(b"Channel Breakdown", simulations.data)
         self.assertIn(b"EMAIL", simulations.data)
         self.assertIn(b"SMS", simulations.data)
         self.assertIn(b"VOICE", simulations.data)
         self.assertIn(b"Target Activity", simulations.data)
         self.assertIn(b"Attachments opened", simulations.data)
+        self.assertEqual(metrics_dashboard.status_code, 200)
+        self.assertIn(b"Simulation Metrics", metrics_dashboard.data)
+        self.assertIn(b"Portfolio Summary", metrics_dashboard.data)
+        self.assertIn(b"Channel Comparison", metrics_dashboard.data)
+        self.assertIn(b"Campaign Trends", metrics_dashboard.data)
+        self.assertIn(b"Target Risk Summary", metrics_dashboard.data)
+        self.assertIn(b'name="campaign_id"', metrics_dashboard.data)
+        self.assertIn(b'name="channel"', metrics_dashboard.data)
+        self.assertIn(b'name="department"', metrics_dashboard.data)
+        self.assertIn(b'name="delivery_status"', metrics_dashboard.data)
         self.assertEqual(campaigns.status_code, 200)
         self.assertIn(b"Campaign Management", campaigns.data)
         self.assertIn(b"New Campaign", campaigns.data)
@@ -449,6 +461,73 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["error"]["type"], "simulation_metrics_overview_error")
         self.assertIn("Channel must be one of", payload["error"]["message"])
+
+    def test_metrics_dashboard_renders_filtered_campaign_reporting(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            campaign = create_campaign(
+                conn,
+                "Dashboard Metrics Campaign",
+                status="active",
+                selected_channels=["email", "voice"],
+            )
+            email_target = create_target(
+                conn,
+                campaign["id"],
+                name="Dashboard Metrics Email",
+                email="dashboard.metrics@example.test",
+                department="Finance",
+                channel="email",
+            )
+            voice_target = create_target(
+                conn,
+                campaign["id"],
+                name="Dashboard Metrics Voice",
+                phone="+15550103333",
+                department="Operations",
+                channel="voice",
+            )
+            record_simulation_event(
+                conn,
+                campaign["id"],
+                "delivered",
+                target_id=email_target["id"],
+                channel="email",
+                occurred_at="2026-09-22T10:00:00+00:00",
+            )
+            record_simulation_event(
+                conn,
+                campaign["id"],
+                "link_click",
+                target_id=email_target["id"],
+                channel="email",
+                occurred_at="2026-09-22T10:10:00+00:00",
+            )
+            record_simulation_event(
+                conn,
+                campaign["id"],
+                "voice_response",
+                target_id=voice_target["id"],
+                channel="voice",
+                occurred_at="2026-09-22T10:15:00+00:00",
+            )
+        finally:
+            conn.close()
+
+        response = self.client.get(
+            "/simulations/metrics?campaign_id={}&channel=email&department=Finance&delivery_status=delivered&start_date=2026-09-22&end_date=2026-09-22".format(
+                campaign["id"]
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Dashboard Metrics Campaign", response.data)
+        self.assertIn(b"Dashboard Metrics Email", response.data)
+        self.assertNotIn(b"Dashboard Metrics Voice</", response.data)
+        self.assertIn(b"selected>EMAIL</option>", response.data)
+        self.assertIn(b"selected>Finance</option>", response.data)
+        self.assertIn(b"value=\"2026-09-22\"", response.data)
+        self.assertIn(b"Risk", response.data)
 
     def test_events_api_records_allowed_lab_events(self):
         response = self.client.post(
