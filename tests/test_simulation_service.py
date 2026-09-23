@@ -14,7 +14,10 @@ from core.simulation_service import (
     create_target,
     get_campaign_detail,
     get_campaign_metrics,
+    get_channel_metrics,
+    get_department_metrics,
     get_delivery_job_status,
+    get_target_metrics,
     import_targets_csv,
     generate_ai_scenario,
     list_ai_generation_audits,
@@ -63,8 +66,81 @@ class SimulationServiceTest(unittest.TestCase):
         self.assertEqual(metrics["aggregate"]["opened"], 3)
         self.assertEqual(metrics["aggregate"]["link_clicked"], 2)
         self.assertEqual(metrics["aggregate"]["attachment_opened"], 1)
+        self.assertEqual(metrics["aggregate"]["delivered_rate"], 1.0)
+        self.assertEqual(metrics["aggregate"]["opened_rate"], 0.75)
         self.assertEqual(set(metrics["channels"].keys()), {"email", "sms", "voice"})
         self.assertEqual(metrics["channels"]["email"]["total_targets"], 2)
+        self.assertIn("Finance", metrics["departments"])
+        self.assertEqual(len(metrics["targets"]), 4)
+
+    def test_normalized_metrics_deduplicate_events_and_group_by_department(self):
+        campaign = create_campaign(self.conn, "Normalized Metrics Test", selected_channels=["email", "voice"])
+        email_target = create_target(
+            self.conn,
+            campaign["id"],
+            name="Email Target",
+            email="email.target@example.test",
+            department="Finance",
+            channel="email",
+        )
+        voice_target = create_target(
+            self.conn,
+            campaign["id"],
+            name="Voice Target",
+            phone="+15550101111",
+            department="Operations",
+            channel="voice",
+        )
+
+        for event_type in ("queued", "sent", "delivered", "open", "opened", "link_click"):
+            record_simulation_event(
+                self.conn,
+                campaign["id"],
+                event_type,
+                target_id=email_target["id"],
+                channel="email",
+                metadata={"source": "unit-test"},
+            )
+        record_simulation_event(
+            self.conn,
+            campaign["id"],
+            "failed",
+            target_id=voice_target["id"],
+            channel="voice",
+            delivery_status="failed",
+            metadata={"source": "unit-test"},
+        )
+        record_simulation_event(
+            self.conn,
+            campaign["id"],
+            "voice_response",
+            channel="voice",
+            metadata={"source": "unit-test", "response": "completed_training"},
+        )
+
+        metrics = get_campaign_metrics(self.conn, campaign["id"])
+        channels = get_channel_metrics(self.conn, campaign["id"])
+        departments = get_department_metrics(self.conn, campaign["id"])
+        targets = get_target_metrics(self.conn, campaign["id"])
+
+        self.assertEqual(metrics["aggregate"]["total_targets"], 2)
+        self.assertEqual(metrics["aggregate"]["queued"], 1)
+        self.assertEqual(metrics["aggregate"]["sent"], 1)
+        self.assertEqual(metrics["aggregate"]["delivered"], 1)
+        self.assertEqual(metrics["aggregate"]["failed"], 1)
+        self.assertEqual(metrics["aggregate"]["opened"], 1)
+        self.assertEqual(metrics["aggregate"]["link_clicked"], 1)
+        self.assertEqual(metrics["aggregate"]["voice_responses"], 1)
+        self.assertEqual(metrics["aggregate"]["opened_rate"], 0.5)
+        self.assertEqual(channels["email"]["opened"], 1)
+        self.assertEqual(channels["voice"]["failed"], 1)
+        self.assertEqual(channels["voice"]["voice_responses"], 1)
+        self.assertEqual(departments["Finance"]["delivered"], 1)
+        self.assertEqual(departments["Operations"]["failed"], 1)
+        self.assertEqual(
+            {target["target_id"]: target["opened"] for target in targets},
+            {email_target["id"]: 1, voice_target["id"]: 0},
+        )
 
     def test_lists_targets_with_boolean_rollup_fields(self):
         targets = list_targets(self.conn, self.campaign_id)

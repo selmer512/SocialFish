@@ -13,7 +13,7 @@ This phase modernizes reporting so the Cybersecurity Team can understand campaig
   - Delivery/tracking events are normalized through `VALID_SIMULATION_EVENTS` and `record_simulation_event`, with aliases for `open`/`opened`, `forward`/`forwarded`, `delete`/`deleted`, `link_click`/`link_clicked`, and `attachment_open`/`attachment_opened`. Dry-run delivery writes queued/sent/delivered events and provider metadata without external sends.
   - Existing coverage lives in `tests/test_simulation_service.py`, `tests/test_simulation_routes.py`, and `tests/test_simulation_smoke.py`; future metrics work should expand those tests around filters, event-derived counts/rates, exports, and empty campaign states.
 
-- [ ] Implement normalized metrics aggregation:
+- [x] Implement normalized metrics aggregation:
   - Add service functions for campaign-level, channel-level, department-level, and target-level metrics
   - Calculate counts and rates for queued, sent, delivered, failed, opened, forwarded, deleted, link clicked, attachment opened, and voice responses
   - Handle missing events and dry-run events consistently

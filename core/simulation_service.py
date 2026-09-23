@@ -88,6 +88,37 @@ VALID_SIMULATION_EVENTS = {
     },
 }
 
+METRIC_EVENT_ALIASES = {
+    "queued": "queued",
+    "sent": "sent",
+    "delivered": "delivered",
+    "failed": "failed",
+    "open": "opened",
+    "opened": "opened",
+    "forward": "forwarded",
+    "forwarded": "forwarded",
+    "delete": "deleted",
+    "deleted": "deleted",
+    "link_click": "link_clicked",
+    "link_clicked": "link_clicked",
+    "attachment_open": "attachment_opened",
+    "attachment_opened": "attachment_opened",
+    "voice_response": "voice_responses",
+}
+METRIC_COUNT_FIELDS = (
+    "queued",
+    "sent",
+    "delivered",
+    "failed",
+    "opened",
+    "forwarded",
+    "deleted",
+    "link_clicked",
+    "attachment_opened",
+    "voice_responses",
+)
+DELIVERY_STATUS_METRICS = {"queued", "sent", "delivered", "failed"}
+
 
 def _utc_now():
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -1044,76 +1075,234 @@ def import_targets_csv(conn, campaign_id, csv_content, original_filename=None, s
     }
 
 
-def get_campaign_metrics(conn, campaign_id=None):
-    """Calculate aggregate and channel-level simulation metrics."""
+def _metric_bucket(total_targets=0):
+    bucket = {"total_targets": int(total_targets or 0)}
+    for field in METRIC_COUNT_FIELDS:
+        bucket[field] = 0
+        bucket["{}_rate".format(field)] = 0.0
+    return bucket
+
+
+def _increment_metric(bucket, metric):
+    if metric in METRIC_COUNT_FIELDS:
+        bucket[metric] = int(bucket.get(metric) or 0) + 1
+
+
+def _finalize_metric_bucket(bucket):
+    denominator = int(bucket.get("total_targets") or 0)
+    for field in METRIC_COUNT_FIELDS:
+        bucket[field] = int(bucket.get(field) or 0)
+        bucket["{}_rate".format(field)] = round(bucket[field] / denominator, 4) if denominator else 0.0
+    return bucket
+
+
+def _department_key(value):
+    return _normalize_text(value) or "Unassigned"
+
+
+def _normalized_metric_event(event_type):
+    return METRIC_EVENT_ALIASES.get((_normalize_text(event_type) or "").lower())
+
+
+def _target_metric_from_rollup(target, metric):
+    if metric in DELIVERY_STATUS_METRICS:
+        return target.get("delivery_status") == metric
+    if metric == "opened":
+        return target.get("opened")
+    if metric == "forwarded":
+        return target.get("forwarded")
+    if metric == "deleted":
+        return target.get("deleted")
+    if metric == "link_clicked":
+        return target.get("link_clicked")
+    if metric == "attachment_opened":
+        return target.get("attachment_opened")
+    return False
+
+
+def _fetch_metric_targets(conn, campaign_id=None):
     params = []
     where = ""
     if campaign_id is not None:
-        where = "WHERE campaign_id = ?"
+        where = "WHERE t.campaign_id = ?"
         params.append(campaign_id)
-
-    aggregate = _row_to_dict(
+    rows = _rows_to_dicts(
         conn.execute(
             f"""
             SELECT
-                COUNT(*) AS total_targets,
-                SUM(CASE WHEN delivery_status = 'delivered' THEN 1 ELSE 0 END) AS delivered,
-                SUM(opened) AS opened,
-                SUM(forwarded) AS forwarded,
-                SUM(deleted) AS deleted,
-                SUM(link_clicked) AS link_clicked,
-                SUM(attachment_opened) AS attachment_opened
-            FROM simulation_targets
+                t.id,
+                t.campaign_id,
+                c.name AS campaign_name,
+                t.name,
+                t.display_name,
+                t.email,
+                t.phone,
+                t.department,
+                t.channel,
+                t.delivery_status,
+                t.opened,
+                t.forwarded,
+                t.deleted,
+                t.link_clicked,
+                t.attachment_opened,
+                t.delivered_at,
+                t.opened_at,
+                t.forwarded_at,
+                t.deleted_at,
+                t.link_clicked_at,
+                t.attachment_opened_at,
+                t.archived_at
+            FROM simulation_targets t
+            JOIN simulation_campaigns c ON c.id = t.campaign_id
             {where}
+            ORDER BY t.id ASC
             """,
             params,
         )
     )
-    if not aggregate:
-        aggregate = {}
+    return [_target_response(row) for row in rows]
 
-    metric_fields = (
-        "total_targets",
-        "delivered",
-        "opened",
-        "forwarded",
-        "deleted",
-        "link_clicked",
-        "attachment_opened",
-    )
-    for field in metric_fields:
-        aggregate[field] = int(aggregate.get(field) or 0)
 
-    channel_rows = _rows_to_dicts(
+def _fetch_metric_events(conn, campaign_id=None):
+    params = []
+    where = ""
+    if campaign_id is not None:
+        where = "WHERE e.campaign_id = ?"
+        params.append(campaign_id)
+    return _rows_to_dicts(
         conn.execute(
             f"""
             SELECT
-                channel,
-                COUNT(*) AS total_targets,
-                SUM(CASE WHEN delivery_status = 'delivered' THEN 1 ELSE 0 END) AS delivered,
-                SUM(opened) AS opened,
-                SUM(forwarded) AS forwarded,
-                SUM(deleted) AS deleted,
-                SUM(link_clicked) AS link_clicked,
-                SUM(attachment_opened) AS attachment_opened
-            FROM simulation_targets
+                e.id,
+                e.campaign_id,
+                e.target_id,
+                e.channel,
+                e.event_type,
+                e.delivery_status,
+                e.occurred_at,
+                e.metadata
+            FROM simulation_events e
             {where}
-            GROUP BY channel
-            ORDER BY channel ASC
+            ORDER BY e.occurred_at ASC, e.id ASC
             """,
             params,
         )
     )
+
+
+def _build_metric_summary(conn, campaign_id=None):
+    targets = _fetch_metric_targets(conn, campaign_id)
+    target_metrics = {}
     by_channel = {}
-    for row in channel_rows:
-        channel = row.pop("channel")
-        by_channel[channel] = {field: int(row.get(field) or 0) for field in metric_fields}
+    by_department = {}
+    seen_target_metrics = set()
+    untargeted_events = []
+
+    for target in targets:
+        bucket = _metric_bucket(total_targets=1)
+        bucket.update({
+            "target_id": target["id"],
+            "campaign_id": target["campaign_id"],
+            "campaign_name": target.get("campaign_name"),
+            "name": target.get("name"),
+            "display_name": target.get("display_name") or target.get("name"),
+            "email": target.get("email"),
+            "phone": target.get("phone"),
+            "department": target.get("department"),
+            "channel": target.get("channel"),
+            "delivery_status": target.get("delivery_status"),
+            "archived": target.get("archived"),
+        })
+        target_metrics[target["id"]] = bucket
+        channel = target.get("channel") or "unknown"
+        department = _department_key(target.get("department"))
+        by_channel.setdefault(channel, _metric_bucket())
+        by_channel[channel]["total_targets"] += 1
+        by_department.setdefault(department, _metric_bucket())
+        by_department[department]["total_targets"] += 1
+
+    for event in _fetch_metric_events(conn, campaign_id):
+        metric = _normalized_metric_event(event.get("event_type"))
+        if not metric:
+            continue
+        target_id = event.get("target_id")
+        if target_id in target_metrics:
+            key = (target_id, metric)
+            if key in seen_target_metrics:
+                continue
+            seen_target_metrics.add(key)
+            _increment_metric(target_metrics[target_id], metric)
+        else:
+            untargeted_events.append(event)
+
+    for target in targets:
+        target_bucket = target_metrics[target["id"]]
+        for metric in METRIC_COUNT_FIELDS:
+            if target_bucket.get(metric):
+                continue
+            if _target_metric_from_rollup(target, metric):
+                target_bucket[metric] = 1
+
+        channel = target.get("channel") or "unknown"
+        department = _department_key(target.get("department"))
+        for metric in METRIC_COUNT_FIELDS:
+            count = int(target_bucket.get(metric) or 0)
+            by_channel[channel][metric] += count
+            by_department[department][metric] += count
+
+    for event in untargeted_events:
+        metric = _normalized_metric_event(event.get("event_type"))
+        if metric != "voice_responses":
+            continue
+        channel = event.get("channel") or "unknown"
+        by_channel.setdefault(channel, _metric_bucket())
+        by_channel[channel][metric] += 1
+
+    aggregate = _metric_bucket(total_targets=len(targets))
+    for target_bucket in target_metrics.values():
+        for metric in METRIC_COUNT_FIELDS:
+            aggregate[metric] += int(target_bucket.get(metric) or 0)
+    for event in untargeted_events:
+        if _normalized_metric_event(event.get("event_type")) == "voice_responses":
+            aggregate["voice_responses"] += 1
 
     return {
-        "aggregate": aggregate,
-        "channels": by_channel,
-        "campaigns": list_campaigns(conn),
+        "aggregate": _finalize_metric_bucket(aggregate),
+        "channels": {
+            channel: _finalize_metric_bucket(bucket)
+            for channel, bucket in sorted(by_channel.items())
+        },
+        "departments": {
+            department: _finalize_metric_bucket(bucket)
+            for department, bucket in sorted(by_department.items())
+        },
+        "targets": [
+            _finalize_metric_bucket(target_metrics[target["id"]])
+            for target in targets
+        ],
     }
+
+
+def get_channel_metrics(conn, campaign_id=None):
+    """Return normalized channel-level simulation metrics."""
+    return _build_metric_summary(conn, campaign_id)["channels"]
+
+
+def get_department_metrics(conn, campaign_id=None):
+    """Return normalized department-level simulation metrics."""
+    return _build_metric_summary(conn, campaign_id)["departments"]
+
+
+def get_target_metrics(conn, campaign_id=None):
+    """Return normalized target-level simulation metrics."""
+    return _build_metric_summary(conn, campaign_id)["targets"]
+
+
+def get_campaign_metrics(conn, campaign_id=None):
+    """Calculate normalized campaign metrics from events with target rollup fallback."""
+    metrics = _build_metric_summary(conn, campaign_id)
+    metrics["campaigns"] = list_campaigns(conn)
+    return metrics
 
 
 def record_simulation_event(
