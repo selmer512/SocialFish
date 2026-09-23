@@ -433,6 +433,18 @@ def _delivery_provider_response(row):
     return provider
 
 
+def _directory_provider_response(row):
+    provider = dict(row)
+    provider["enabled"] = _bool(provider.get("enabled"))
+    provider["consented_scopes"] = _json_list(provider.pop("consented_scopes_json", None))
+    provider["selected_groups"] = _json_list(provider.pop("selected_groups_json", None))
+    provider["field_mapping"] = _json_dict(provider.pop("field_mapping_json", None))
+    provider["settings"] = _json_dict(provider.pop("settings_json", None))
+    provider["secret_configured"] = provider.get("secret_placeholder") == "configured"
+    provider.pop("secret_placeholder", None)
+    return provider
+
+
 def _delivery_job_response(row):
     if not row:
         return None
@@ -2552,6 +2564,295 @@ def update_delivery_provider_settings(
     )
     conn.commit()
     return get_delivery_provider_settings(conn, provider_id)
+
+
+def list_directory_provider_settings(conn, provider_type=None):
+    """Return directory provider settings without raw OAuth secret material."""
+    params = []
+    filters = []
+    if provider_type is not None:
+        normalized_type = (_normalize_text(provider_type) or "").lower()
+        filters.append("provider_type = ?")
+        params.append(normalized_type)
+    where = "WHERE {}".format(" AND ".join(filters)) if filters else ""
+    cursor = conn.execute(
+        f"""
+        SELECT
+            id,
+            name,
+            provider_type,
+            tenant_id,
+            tenant_name,
+            authority_url,
+            client_id,
+            enabled,
+            consent_status,
+            consented_scopes_json,
+            selected_groups_json,
+            field_mapping_json,
+            settings_json,
+            secret_reference,
+            secret_placeholder,
+            last_sync_status,
+            last_sync_job_id,
+            last_sync_at,
+            last_error_message,
+            created_at,
+            updated_at
+        FROM directory_providers
+        {where}
+        ORDER BY name ASC, id ASC
+        """,
+        params,
+    )
+    return [_directory_provider_response(row) for row in _rows_to_dicts(cursor)]
+
+
+def get_directory_provider_settings(conn, provider_id):
+    provider = _row_to_dict(
+        conn.execute(
+            """
+            SELECT
+                id,
+                name,
+                provider_type,
+                tenant_id,
+                tenant_name,
+                authority_url,
+                client_id,
+                enabled,
+                consent_status,
+                consented_scopes_json,
+                selected_groups_json,
+                field_mapping_json,
+                settings_json,
+                secret_reference,
+                secret_placeholder,
+                last_sync_status,
+                last_sync_job_id,
+                last_sync_at,
+                last_error_message,
+                created_at,
+                updated_at
+            FROM directory_providers
+            WHERE id = ?
+            """,
+            (provider_id,),
+        )
+    )
+    return _directory_provider_response(provider) if provider else None
+
+
+def create_directory_provider_settings(
+    conn,
+    name,
+    provider_type="mock_entra",
+    tenant_id=None,
+    tenant_name=None,
+    authority_url=None,
+    client_id=None,
+    enabled=False,
+    consent_status="not_configured",
+    consented_scopes=None,
+    selected_groups=None,
+    field_mapping=None,
+    settings=None,
+    secret_reference=None,
+    secret=None,
+):
+    """Create UI-managed directory provider settings without storing raw secrets."""
+    normalized_name = _normalize_text(name)
+    if not normalized_name:
+        raise ValueError("Directory provider name is required.")
+    if field_mapping is not None and not isinstance(field_mapping, dict):
+        raise ValueError("Directory field mapping must be a JSON object.")
+    if settings is not None and not isinstance(settings, dict):
+        raise ValueError("Directory provider settings must be a JSON object.")
+
+    now = _utc_now()
+    cursor = conn.execute(
+        """
+        INSERT INTO directory_providers (
+            name, provider_type, tenant_id, tenant_name, authority_url,
+            client_id, enabled, consent_status, consented_scopes_json,
+            selected_groups_json, field_mapping_json, settings_json,
+            secret_reference, secret_placeholder, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            normalized_name,
+            (_normalize_text(provider_type) or "mock_entra").lower(),
+            _normalize_text(tenant_id),
+            _normalize_text(tenant_name),
+            _normalize_text(authority_url),
+            _normalize_text(client_id),
+            1 if bool(enabled) else 0,
+            (_normalize_text(consent_status) or "not_configured").lower(),
+            json.dumps(list(consented_scopes or []), sort_keys=True),
+            json.dumps(list(selected_groups or []), sort_keys=True),
+            _safe_json_dumps(field_mapping),
+            _safe_json_dumps(settings),
+            _normalize_text(secret_reference),
+            "configured" if secret else "not-configured",
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return get_directory_provider_settings(conn, cursor.lastrowid)
+
+
+def update_directory_provider_settings(
+    conn,
+    provider_id,
+    name=None,
+    provider_type=None,
+    tenant_id=None,
+    tenant_name=None,
+    authority_url=None,
+    client_id=None,
+    enabled=None,
+    consent_status=None,
+    consented_scopes=None,
+    selected_groups=None,
+    field_mapping=None,
+    settings=None,
+    secret_reference=None,
+    secret=None,
+    last_error_message=None,
+):
+    """Update directory provider settings while preserving write-only secrets."""
+    existing = _row_to_dict(
+        conn.execute(
+            "SELECT * FROM directory_providers WHERE id = ?",
+            (provider_id,),
+        )
+    )
+    if not existing:
+        raise ValueError("Unknown directory provider config id: {}".format(provider_id))
+    if field_mapping is not None and not isinstance(field_mapping, dict):
+        raise ValueError("Directory field mapping must be a JSON object.")
+    if settings is not None and not isinstance(settings, dict):
+        raise ValueError("Directory provider settings must be a JSON object.")
+
+    existing_settings = _json_dict(existing.get("settings_json"))
+    if settings is not None:
+        existing_settings.update({
+            str(key): _normalize_text(value)
+            for key, value in settings.items()
+            if _normalize_text(key)
+        })
+
+    now = _utc_now()
+    updated = {
+        "name": _normalize_text(name) or existing["name"],
+        "provider_type": (_normalize_text(provider_type) or existing["provider_type"]).lower(),
+        "tenant_id": _normalize_text(tenant_id) if tenant_id is not None else existing["tenant_id"],
+        "tenant_name": _normalize_text(tenant_name) if tenant_name is not None else existing["tenant_name"],
+        "authority_url": _normalize_text(authority_url) if authority_url is not None else existing["authority_url"],
+        "client_id": _normalize_text(client_id) if client_id is not None else existing["client_id"],
+        "enabled": 1 if bool(enabled) else 0 if enabled is not None else existing["enabled"],
+        "consent_status": (_normalize_text(consent_status) or existing["consent_status"]).lower(),
+        "consented_scopes_json": json.dumps(
+            list(consented_scopes) if consented_scopes is not None else _json_list(existing["consented_scopes_json"]),
+            sort_keys=True,
+        ),
+        "selected_groups_json": json.dumps(
+            list(selected_groups) if selected_groups is not None else _json_list(existing["selected_groups_json"]),
+            sort_keys=True,
+        ),
+        "field_mapping_json": _safe_json_dumps(
+            field_mapping if field_mapping is not None else _json_dict(existing["field_mapping_json"])
+        ),
+        "settings_json": _safe_json_dumps(existing_settings),
+        "secret_reference": _normalize_text(secret_reference) if secret_reference is not None else existing["secret_reference"],
+        "secret_placeholder": existing["secret_placeholder"],
+        "last_error_message": _normalize_text(last_error_message),
+        "updated_at": now,
+    }
+    if secret:
+        updated["secret_placeholder"] = "configured"
+
+    conn.execute(
+        """
+        UPDATE directory_providers
+        SET
+            name = ?,
+            provider_type = ?,
+            tenant_id = ?,
+            tenant_name = ?,
+            authority_url = ?,
+            client_id = ?,
+            enabled = ?,
+            consent_status = ?,
+            consented_scopes_json = ?,
+            selected_groups_json = ?,
+            field_mapping_json = ?,
+            settings_json = ?,
+            secret_reference = ?,
+            secret_placeholder = ?,
+            last_error_message = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            updated["name"],
+            updated["provider_type"],
+            updated["tenant_id"],
+            updated["tenant_name"],
+            updated["authority_url"],
+            updated["client_id"],
+            updated["enabled"],
+            updated["consent_status"],
+            updated["consented_scopes_json"],
+            updated["selected_groups_json"],
+            updated["field_mapping_json"],
+            updated["settings_json"],
+            updated["secret_reference"],
+            updated["secret_placeholder"],
+            updated["last_error_message"],
+            updated["updated_at"],
+            provider_id,
+        ),
+    )
+    conn.commit()
+    return get_directory_provider_settings(conn, provider_id)
+
+
+def _directory_provider_or_error(conn, provider_id):
+    provider = get_directory_provider_settings(conn, provider_id)
+    if not provider:
+        raise ValueError("Unknown directory provider config id: {}".format(provider_id))
+    return provider
+
+
+def list_directory_groups(conn, provider_id):
+    """List groups through the connector selected by UI-managed provider type."""
+    from core.directory_connectors import list_groups_with_provider_settings
+
+    return list_groups_with_provider_settings(_directory_provider_or_error(conn, provider_id))
+
+
+def preview_directory_users(conn, provider_id, group_ids=None):
+    """Preview directory users through the connector selected by UI-managed settings."""
+    from core.directory_connectors import preview_users_with_provider_settings
+
+    return preview_users_with_provider_settings(_directory_provider_or_error(conn, provider_id), group_ids=group_ids)
+
+
+def sync_directory_staged_users(conn, provider_id, group_ids=None):
+    """Return staged user candidates without importing them into campaigns."""
+    from core.directory_connectors import sync_staged_users_with_provider_settings
+
+    return sync_staged_users_with_provider_settings(_directory_provider_or_error(conn, provider_id), group_ids=group_ids)
+
+
+def map_directory_user_to_target(conn, provider_id, user):
+    """Map a connector user into the existing simulation target payload shape."""
+    from core.directory_connectors import map_user_to_target_with_provider_settings
+
+    return map_user_to_target_with_provider_settings(_directory_provider_or_error(conn, provider_id), user)
 
 
 def list_ai_provider_settings(conn):

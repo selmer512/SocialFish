@@ -13,11 +13,15 @@ This phase prepares SocialFish for Microsoft Entra ID target synchronization wit
   - Keep schema changes idempotent and avoid storing raw OAuth tokens in plain rendered pages or JSON
   - Completed with additive SQLite migrations in `core/db_migration.py` and coverage in `tests/test_simulation_migration.py`; secrets are modeled as `secret_reference` / `secret_placeholder` rather than raw OAuth token fields.
 
-- [ ] Implement directory connector interfaces:
+- [x] Implement directory connector interfaces:
   - Add a provider-neutral connector contract for listing groups, previewing users, syncing staged users, and mapping fields to simulation targets
   - Add a mock Entra connector that returns deterministic groups and users for development/testing
   - Add a Microsoft Graph connector shell that validates required settings but does not require real credentials for tests
   - Keep connector selection driven by GUI-managed settings
+  - Completed with `core/directory_connectors.py` dataclasses, protocol, mock Entra adapter, and Microsoft Graph shell.
+  - Added directory provider settings helpers in `core/simulation_service.py` that redact secrets and select connectors from database/UI-managed provider type.
+  - Covered mock groups/users, staged sync previews, field mapping, Microsoft Graph validation, provider selection, and secret redaction in `tests/test_directory_connectors.py`.
+  - Verified with `python -m unittest discover tests`.
 
 - [ ] Add directory settings routes:
   - `GET /integrations/directory` renders directory provider settings and sync status
