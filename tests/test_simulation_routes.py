@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from core.db_migration import SIMULATION_DEMO_SLUG, migrate_db
+from core.simulation_service import create_campaign, create_target, record_simulation_event
 
 
 class SimulationRoutesTest(unittest.TestCase):
@@ -328,6 +329,126 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["metrics"]["aggregate"]["total_targets"], 4)
         self.assertEqual(set(payload["metrics"]["channels"].keys()), {"email", "sms", "voice"})
+
+    def test_reporting_metrics_apis_return_filtered_campaign_target_and_overview_data(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            active_campaign = create_campaign(
+                conn,
+                "Route Metrics Active",
+                status="active",
+                selected_channels=["email", "sms"],
+            )
+            paused_campaign = create_campaign(
+                conn,
+                "Route Metrics Paused",
+                status="paused",
+                selected_channels=["email"],
+            )
+            email_target = create_target(
+                conn,
+                active_campaign["id"],
+                name="Route Metrics Email",
+                email="metrics.email@example.test",
+                department="Finance",
+                channel="email",
+            )
+            sms_target = create_target(
+                conn,
+                active_campaign["id"],
+                name="Route Metrics SMS",
+                phone="+15550102222",
+                department="Operations",
+                channel="sms",
+            )
+            paused_target = create_target(
+                conn,
+                paused_campaign["id"],
+                name="Route Metrics Paused",
+                email="metrics.paused@example.test",
+                department="Finance",
+                channel="email",
+            )
+            record_simulation_event(
+                conn,
+                active_campaign["id"],
+                "delivered",
+                target_id=email_target["id"],
+                channel="email",
+                occurred_at="2026-09-20T10:00:00+00:00",
+            )
+            record_simulation_event(
+                conn,
+                active_campaign["id"],
+                "open",
+                target_id=email_target["id"],
+                channel="email",
+                occurred_at="2026-09-20T11:00:00+00:00",
+            )
+            record_simulation_event(
+                conn,
+                active_campaign["id"],
+                "delivered",
+                target_id=sms_target["id"],
+                channel="sms",
+                occurred_at="2026-09-21T10:00:00+00:00",
+            )
+            record_simulation_event(
+                conn,
+                paused_campaign["id"],
+                "delivered",
+                target_id=paused_target["id"],
+                channel="email",
+                occurred_at="2026-09-20T10:00:00+00:00",
+            )
+        finally:
+            conn.close()
+
+        campaign_response = self.client.get(
+            "/api/simulations/campaigns/{}/metrics?channel=email&start_date=2026-09-20&end_date=2026-09-20".format(
+                active_campaign["id"]
+            )
+        )
+        campaign_payload = campaign_response.get_json()
+
+        self.assertEqual(campaign_response.status_code, 200)
+        self.assertEqual(campaign_payload["status"], "ok")
+        self.assertEqual(campaign_payload["campaign_id"], active_campaign["id"])
+        self.assertEqual(campaign_payload["metrics"]["aggregate"]["total_targets"], 1)
+        self.assertEqual(campaign_payload["metrics"]["aggregate"]["delivered"], 1)
+        self.assertEqual(campaign_payload["metrics"]["aggregate"]["opened"], 1)
+        self.assertEqual(campaign_payload["metrics"]["filters"]["channels"], ["email"])
+
+        targets_response = self.client.get(
+            "/api/simulations/campaigns/{}/targets/metrics?department=Operations".format(
+                active_campaign["id"]
+            )
+        )
+        targets_payload = targets_response.get_json()
+
+        self.assertEqual(targets_response.status_code, 200)
+        self.assertEqual(len(targets_payload["targets"]), 1)
+        self.assertEqual(targets_payload["targets"][0]["target_id"], sms_target["id"])
+        self.assertEqual(targets_payload["targets"][0]["department"], "Operations")
+
+        overview_response = self.client.get(
+            "/api/simulations/metrics/overview?channel=email&start_date=2026-09-20&end_date=2026-09-20"
+        )
+        overview_payload = overview_response.get_json()
+
+        self.assertEqual(overview_response.status_code, 200)
+        self.assertEqual(overview_payload["status"], "ok")
+        self.assertEqual(overview_payload["metrics"]["aggregate"]["delivered"], 1)
+        self.assertEqual(overview_payload["metrics"]["filters"]["active_campaigns_only"], True)
+
+    def test_metrics_apis_reject_unknown_channel_filter(self):
+        response = self.client.get("/api/simulations/metrics/overview?channel=fax")
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["error"]["type"], "simulation_metrics_overview_error")
+        self.assertIn("Channel must be one of", payload["error"]["message"])
 
     def test_events_api_records_allowed_lab_events(self):
         response = self.client.post(

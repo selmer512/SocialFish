@@ -28,6 +28,7 @@ from core.simulation_service import (
     get_campaign_detail,
     get_delivery_job_status,
     get_delivery_provider_by_key,
+    get_target_metrics,
     import_targets_csv,
     list_ai_provider_settings,
     list_campaigns,
@@ -178,6 +179,22 @@ def _optional_int(value):
     if value in (None, ""):
         return None
     return int(value)
+
+
+def _simulation_metric_filters(active_campaigns_only=False):
+    channels = request.args.getlist("channel")
+    if not channels and request.args.get("channels"):
+        channels = request.args.get("channels", "").split(",")
+    filters = {
+        "channels": channels,
+        "start_date": request.args.get("start_date"),
+        "end_date": request.args.get("end_date"),
+        "department": request.args.get("department"),
+        "delivery_status": request.args.get("delivery_status"),
+    }
+    if active_campaigns_only:
+        filters["active_campaigns_only"] = True
+    return filters
 
 
 def _form_bool(value):
@@ -861,11 +878,57 @@ def archive_simulation_target(target_id):
 @app.route("/api/simulations/metrics", methods=['GET'])
 @flask_login.login_required
 def simulation_metrics_api():
-    campaign_id = _optional_int(request.args.get("campaign_id"))
-    return jsonify({
-        'status': 'ok',
-        'metrics': get_campaign_metrics(g.db, campaign_id),
-    })
+    try:
+        campaign_id = _optional_int(request.args.get("campaign_id"))
+        return jsonify({
+            'status': 'ok',
+            'metrics': get_campaign_metrics(g.db, campaign_id, _simulation_metric_filters()),
+        })
+    except (TypeError, ValueError) as e:
+        return _json_error("simulation_metrics_error", str(e), 400)
+
+
+@app.route("/api/simulations/campaigns/<int:campaign_id>/metrics", methods=['GET'])
+@flask_login.login_required
+def simulation_campaign_metrics_api(campaign_id):
+    try:
+        return jsonify({
+            "status": "ok",
+            "campaign_id": campaign_id,
+            "metrics": get_campaign_metrics(g.db, campaign_id, _simulation_metric_filters()),
+        })
+    except (TypeError, ValueError) as e:
+        return _json_error("simulation_campaign_metrics_error", str(e), 400)
+
+
+@app.route("/api/simulations/campaigns/<int:campaign_id>/targets/metrics", methods=['GET'])
+@flask_login.login_required
+def simulation_campaign_target_metrics_api(campaign_id):
+    try:
+        filters = _simulation_metric_filters()
+        return jsonify({
+            "status": "ok",
+            "campaign_id": campaign_id,
+            "targets": get_target_metrics(g.db, campaign_id, filters),
+            "filters": get_campaign_metrics(g.db, campaign_id, filters)["filters"],
+        })
+    except (TypeError, ValueError) as e:
+        return _json_error("simulation_target_metrics_error", str(e), 400)
+
+
+@app.route("/api/simulations/metrics/overview", methods=['GET'])
+@flask_login.login_required
+def simulation_metrics_overview_api():
+    try:
+        return jsonify({
+            "status": "ok",
+            "metrics": get_campaign_metrics(
+                g.db,
+                filters=_simulation_metric_filters(active_campaigns_only=True),
+            ),
+        })
+    except (TypeError, ValueError) as e:
+        return _json_error("simulation_metrics_overview_error", str(e), 400)
 
 
 @app.route("/api/simulations/events", methods=['POST'])

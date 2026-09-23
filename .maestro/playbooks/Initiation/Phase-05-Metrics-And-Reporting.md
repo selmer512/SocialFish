@@ -19,11 +19,16 @@ This phase modernizes reporting so the Cybersecurity Team can understand campaig
   - Handle missing events and dry-run events consistently
   - Keep raw events queryable while using aggregation helpers for UI/reporting
 
-- [ ] Add reporting API endpoints:
+- [x] Add reporting API endpoints:
   - `GET /api/simulations/campaigns/<id>/metrics` returns campaign metrics
   - `GET /api/simulations/campaigns/<id>/targets/metrics` returns target-level metrics
   - `GET /api/simulations/metrics/overview` returns portfolio-level metrics across active campaigns
   - Include date range and channel filters using safe defaults when filters are absent
+
+  Completion notes, 2026-09-23:
+  - Added authenticated JSON endpoints for campaign metrics, campaign target metrics, and active-campaign portfolio overview metrics.
+  - Extended normalized metrics helpers with optional channel, date range, department, delivery status, and active-campaign filters while preserving the existing `/api/simulations/metrics` default behavior.
+  - Added route coverage for filtered campaign/target/overview metrics and invalid channel filter errors.
 
 - [ ] Build the metrics dashboard UI:
   - Add a Simulation Metrics page available from the admin navigation

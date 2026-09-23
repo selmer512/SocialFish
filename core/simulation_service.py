@@ -1100,32 +1100,109 @@ def _department_key(value):
     return _normalize_text(value) or "Unassigned"
 
 
+def _normalize_metric_filters(filters=None):
+    filters = filters or {}
+    normalized = {}
+
+    channel_values = filters.get("channels", filters.get("channel"))
+    if isinstance(channel_values, str):
+        channel_values = channel_values.split(",")
+    channels = []
+    for value in channel_values or []:
+        channel = (_normalize_text(value) or "").lower()
+        if not channel:
+            continue
+        if channel not in VALID_SIMULATION_CHANNELS:
+            raise ValueError("Channel must be one of: {}".format(", ".join(sorted(VALID_SIMULATION_CHANNELS))))
+        if channel not in channels:
+            channels.append(channel)
+    if channels:
+        normalized["channels"] = channels
+
+    for key in ("department", "delivery_status", "start_date", "end_date"):
+        value = _normalize_text(filters.get(key))
+        if value:
+            normalized[key] = value
+
+    if filters.get("active_campaigns_only"):
+        normalized["active_campaigns_only"] = True
+
+    return normalized
+
+
+def _date_in_metric_range(value, filters):
+    if not value:
+        return False
+    start_date = filters.get("start_date")
+    end_date = filters.get("end_date")
+    text_value = str(value)
+    if start_date and text_value < start_date:
+        return False
+    if end_date and text_value[:10] > end_date[:10]:
+        return False
+    return True
+
+
+def _metric_date_filter_active(filters):
+    return bool(filters.get("start_date") or filters.get("end_date"))
+
+
 def _normalized_metric_event(event_type):
     return METRIC_EVENT_ALIASES.get((_normalize_text(event_type) or "").lower())
 
 
-def _target_metric_from_rollup(target, metric):
+def _target_metric_from_rollup(target, metric, filters=None):
+    filters = filters or {}
     if metric in DELIVERY_STATUS_METRICS:
+        if _metric_date_filter_active(filters):
+            if metric == "delivered":
+                return target.get("delivery_status") == metric and _date_in_metric_range(target.get("delivered_at"), filters)
+            return False
         return target.get("delivery_status") == metric
     if metric == "opened":
-        return target.get("opened")
+        return target.get("opened") and (
+            not _metric_date_filter_active(filters) or _date_in_metric_range(target.get("opened_at"), filters)
+        )
     if metric == "forwarded":
-        return target.get("forwarded")
+        return target.get("forwarded") and (
+            not _metric_date_filter_active(filters) or _date_in_metric_range(target.get("forwarded_at"), filters)
+        )
     if metric == "deleted":
-        return target.get("deleted")
+        return target.get("deleted") and (
+            not _metric_date_filter_active(filters) or _date_in_metric_range(target.get("deleted_at"), filters)
+        )
     if metric == "link_clicked":
-        return target.get("link_clicked")
+        return target.get("link_clicked") and (
+            not _metric_date_filter_active(filters) or _date_in_metric_range(target.get("link_clicked_at"), filters)
+        )
     if metric == "attachment_opened":
-        return target.get("attachment_opened")
+        return target.get("attachment_opened") and (
+            not _metric_date_filter_active(filters) or _date_in_metric_range(target.get("attachment_opened_at"), filters)
+        )
     return False
 
 
-def _fetch_metric_targets(conn, campaign_id=None):
+def _fetch_metric_targets(conn, campaign_id=None, filters=None):
+    filters = filters or {}
     params = []
-    where = ""
+    clauses = []
     if campaign_id is not None:
-        where = "WHERE t.campaign_id = ?"
+        clauses.append("t.campaign_id = ?")
         params.append(campaign_id)
+    if filters.get("channels"):
+        placeholders = ",".join("?" for _ in filters["channels"])
+        clauses.append("t.channel IN ({})".format(placeholders))
+        params.extend(filters["channels"])
+    if filters.get("department"):
+        clauses.append("COALESCE(NULLIF(TRIM(t.department), ''), 'Unassigned') = ?")
+        params.append(filters["department"])
+    if filters.get("delivery_status"):
+        clauses.append("t.delivery_status = ?")
+        params.append(filters["delivery_status"])
+    if filters.get("active_campaigns_only"):
+        clauses.append("c.status = 'active'")
+        clauses.append("c.archived_at IS NULL")
+    where = "WHERE {}".format(" AND ".join(clauses)) if clauses else ""
     rows = _rows_to_dicts(
         conn.execute(
             f"""
@@ -1163,12 +1240,33 @@ def _fetch_metric_targets(conn, campaign_id=None):
     return [_target_response(row) for row in rows]
 
 
-def _fetch_metric_events(conn, campaign_id=None):
+def _fetch_metric_events(conn, campaign_id=None, filters=None):
+    filters = filters or {}
     params = []
-    where = ""
+    clauses = []
     if campaign_id is not None:
-        where = "WHERE e.campaign_id = ?"
+        clauses.append("e.campaign_id = ?")
         params.append(campaign_id)
+    if filters.get("channels"):
+        placeholders = ",".join("?" for _ in filters["channels"])
+        clauses.append("e.channel IN ({})".format(placeholders))
+        params.extend(filters["channels"])
+    if filters.get("department"):
+        clauses.append("COALESCE(NULLIF(TRIM(t.department), ''), 'Unassigned') = ?")
+        params.append(filters["department"])
+    if filters.get("delivery_status"):
+        clauses.append("COALESCE(e.delivery_status, t.delivery_status) = ?")
+        params.append(filters["delivery_status"])
+    if filters.get("start_date"):
+        clauses.append("e.occurred_at >= ?")
+        params.append(filters["start_date"])
+    if filters.get("end_date"):
+        clauses.append("substr(e.occurred_at, 1, 10) <= ?")
+        params.append(filters["end_date"][:10])
+    if filters.get("active_campaigns_only"):
+        clauses.append("c.status = 'active'")
+        clauses.append("c.archived_at IS NULL")
+    where = "WHERE {}".format(" AND ".join(clauses)) if clauses else ""
     return _rows_to_dicts(
         conn.execute(
             f"""
@@ -1182,6 +1280,8 @@ def _fetch_metric_events(conn, campaign_id=None):
                 e.occurred_at,
                 e.metadata
             FROM simulation_events e
+            JOIN simulation_campaigns c ON c.id = e.campaign_id
+            LEFT JOIN simulation_targets t ON t.id = e.target_id
             {where}
             ORDER BY e.occurred_at ASC, e.id ASC
             """,
@@ -1190,8 +1290,9 @@ def _fetch_metric_events(conn, campaign_id=None):
     )
 
 
-def _build_metric_summary(conn, campaign_id=None):
-    targets = _fetch_metric_targets(conn, campaign_id)
+def _build_metric_summary(conn, campaign_id=None, filters=None):
+    filters = _normalize_metric_filters(filters)
+    targets = _fetch_metric_targets(conn, campaign_id, filters)
     target_metrics = {}
     by_channel = {}
     by_department = {}
@@ -1221,7 +1322,7 @@ def _build_metric_summary(conn, campaign_id=None):
         by_department.setdefault(department, _metric_bucket())
         by_department[department]["total_targets"] += 1
 
-    for event in _fetch_metric_events(conn, campaign_id):
+    for event in _fetch_metric_events(conn, campaign_id, filters):
         metric = _normalized_metric_event(event.get("event_type"))
         if not metric:
             continue
@@ -1240,7 +1341,7 @@ def _build_metric_summary(conn, campaign_id=None):
         for metric in METRIC_COUNT_FIELDS:
             if target_bucket.get(metric):
                 continue
-            if _target_metric_from_rollup(target, metric):
+            if _target_metric_from_rollup(target, metric, filters):
                 target_bucket[metric] = 1
 
         channel = target.get("channel") or "unknown"
@@ -1283,25 +1384,30 @@ def _build_metric_summary(conn, campaign_id=None):
     }
 
 
-def get_channel_metrics(conn, campaign_id=None):
+def get_channel_metrics(conn, campaign_id=None, filters=None):
     """Return normalized channel-level simulation metrics."""
-    return _build_metric_summary(conn, campaign_id)["channels"]
+    return _build_metric_summary(conn, campaign_id, filters)["channels"]
 
 
-def get_department_metrics(conn, campaign_id=None):
+def get_department_metrics(conn, campaign_id=None, filters=None):
     """Return normalized department-level simulation metrics."""
-    return _build_metric_summary(conn, campaign_id)["departments"]
+    return _build_metric_summary(conn, campaign_id, filters)["departments"]
 
 
-def get_target_metrics(conn, campaign_id=None):
+def get_target_metrics(conn, campaign_id=None, filters=None):
     """Return normalized target-level simulation metrics."""
-    return _build_metric_summary(conn, campaign_id)["targets"]
+    return _build_metric_summary(conn, campaign_id, filters)["targets"]
 
 
-def get_campaign_metrics(conn, campaign_id=None):
+def get_campaign_metrics(conn, campaign_id=None, filters=None):
     """Calculate normalized campaign metrics from events with target rollup fallback."""
-    metrics = _build_metric_summary(conn, campaign_id)
-    metrics["campaigns"] = list_campaigns(conn)
+    filters = _normalize_metric_filters(filters)
+    metrics = _build_metric_summary(conn, campaign_id, filters)
+    campaigns = list_campaigns(conn)
+    if filters.get("active_campaigns_only"):
+        campaigns = [campaign for campaign in campaigns if campaign.get("status") == "active"]
+    metrics["campaigns"] = campaigns
+    metrics["filters"] = filters
     return metrics
 
 
