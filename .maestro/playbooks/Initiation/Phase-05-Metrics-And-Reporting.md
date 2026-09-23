@@ -75,11 +75,16 @@ This phase modernizes reporting so the Cybersecurity Team can understand campaig
   - Added `docs/features/simulation-metrics.md` with structured reference front matter and the requested wiki-links.
   - Documented reporting surfaces, normalized event taxonomy, metric formulas, filters, CSV/JSON/print export formats, and dry-run interpretation.
 
-- [ ] Add automated metrics and reporting coverage:
+- [x] Add automated metrics and reporting coverage:
   - Test aggregation math for each tracked event type
   - Test date range, campaign, channel, department, and status filters
   - Test CSV and JSON exports
   - Test that report views render for seeded and empty campaign states
+
+  Completion notes, 2026-09-23:
+  - Added service coverage for every normalized metrics event count/rate, including queued, sent, delivered, failed, opened, forwarded, deleted, link clicked, attachment opened, and voice responses.
+  - Added filter assertions for campaign scope, channel, department, delivery status, and date ranges.
+  - Added route coverage for empty campaign metrics APIs, target CSV exports, event JSON exports, and printable report rendering while preserving existing seeded campaign export coverage.
 
 - [ ] Run metrics verification:
   - Run the metrics/reporting tests

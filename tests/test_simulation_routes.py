@@ -603,6 +603,46 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Target Metrics", report_response.data)
         self.assertIn(b"Event Sources", report_response.data)
 
+    def test_campaign_reporting_views_render_empty_campaign_state(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            campaign = create_campaign(
+                conn,
+                "Empty Metrics Campaign",
+                status="active",
+                selected_channels=["email", "sms"],
+            )
+        finally:
+            conn.close()
+
+        metrics_response = self.client.get("/api/simulations/campaigns/{}/metrics".format(campaign["id"]))
+        metrics_payload = metrics_response.get_json()
+        self.assertEqual(metrics_response.status_code, 200)
+        self.assertEqual(metrics_payload["metrics"]["aggregate"]["total_targets"], 0)
+        self.assertEqual(metrics_payload["metrics"]["aggregate"]["delivered_rate"], 0.0)
+
+        targets_response = self.client.get("/api/simulations/campaigns/{}/targets/metrics".format(campaign["id"]))
+        targets_payload = targets_response.get_json()
+        self.assertEqual(targets_response.status_code, 200)
+        self.assertEqual(targets_payload["targets"], [])
+
+        csv_response = self.client.get("/simulations/campaigns/{}/targets/metrics.csv".format(campaign["id"]))
+        self.assertEqual(csv_response.status_code, 200)
+        self.assertIn(b"campaign_id,campaign_name,target_id,display_name", csv_response.data)
+        self.assertNotIn(b"Empty Metrics Campaign,", csv_response.data)
+
+        json_response = self.client.get("/simulations/campaigns/{}/events.json".format(campaign["id"]))
+        events_payload = json.loads(json_response.data.decode("utf-8"))
+        self.assertEqual(json_response.status_code, 200)
+        self.assertEqual(events_payload["events"], [])
+
+        report_response = self.client.get("/simulations/campaigns/{}/report".format(campaign["id"]))
+        self.assertEqual(report_response.status_code, 200)
+        self.assertIn(b"Empty Metrics Campaign", report_response.data)
+        self.assertIn(b"No channel metrics match the current filters.", report_response.data)
+        self.assertIn(b"No target metrics match the current filters.", report_response.data)
+        self.assertIn(b"No events recorded yet.", report_response.data)
+
     def test_events_api_records_allowed_lab_events(self):
         response = self.client.post(
             "/api/simulations/events",
