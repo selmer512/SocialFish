@@ -105,7 +105,13 @@ This phase adds simulation delivery orchestration and event tracking for email, 
   - Expanded route coverage for disabled and incomplete provider selections so API payloads and rendered status pages expose failed attempts with clear error messages and no external delivery.
   - Verified with `python -m unittest tests.test_simulation_service`, `python -m unittest tests.test_simulation_routes`, and `python -m unittest discover tests`.
 
-- [ ] Run delivery verification:
+- [x] Run delivery verification:
   - Run the delivery and tracking tests
   - Use automated HTTP requests to create a delivery preview, start a dry-run job, fetch job JSON, call tracking endpoints with generated tokens, and verify metrics update
   - Fix any schema, service, route, or template failures discovered during verification
+
+  Completed 2026-09-23:
+  - Ran focused delivery and tracking suites with `python -m unittest tests.test_simulation_service tests.test_simulation_routes`; 44 tests passed.
+  - Added and ran `.maestro/playbooks/Working/verify_delivery_http.py`, which uses Flask test-client HTTP requests to preview delivery, start a dry-run job, fetch job JSON, call open/link/attachment tracking endpoints with generated tokens, and verify aggregate metrics and token events update.
+  - Ran full regression coverage with `python -m unittest discover tests`; 65 tests passed.
+  - No schema, service, route, or template failures remained after verification.
