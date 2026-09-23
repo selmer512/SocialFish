@@ -59,6 +59,111 @@
                     </div>
                 </div>
                 <hr>
+                <h4 class="mb-3" id="metrics">Campaign Metrics</h4>
+                <div class="alert alert-secondary" role="alert">
+                    <strong>Event source labels:</strong>
+                    Dry-run events come from delivery jobs that avoid external traffic, Simulated events come from internal tracking or test activity, and Real-provider events come from configured provider sends or webhooks.
+                </div>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr><th>Funnel Step</th><th>Count</th><th>Rate</th><th>Report Links</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for step in reporting.delivery_funnel %}
+                            <tr class="tr-shadow">
+                                <td>
+                                    {{ step.label }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ step.description }}</small>
+                                </td>
+                                <td>{{ step.count }}</td>
+                                <td>{{ (step.rate * 100)|round(1) }}%</td>
+                                <td>
+                                    <a href="#{{ step.target_anchor }}">Targets</a>
+                                    <span class="text-muted">/</span>
+                                    <a href="#{{ step.event_anchor }}">Events</a>
+                                </td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <h5 class="mb-3">Per-Channel Status</h5>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr><th>Channel</th><th>Targets</th><th>Queued</th><th>Sent</th><th>Delivered</th><th>Failed</th><th>Opened</th><th>Clicked</th><th>Attachment</th><th>Voice</th><th>Filtered View</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for channel in reporting.channels %}
+                            <tr class="tr-shadow">
+                                <td><span class="badge badge-secondary">{{ channel.channel|upper }}</span></td>
+                                <td>{{ channel.total_targets }}</td>
+                                <td>{{ channel.queued }}</td>
+                                <td>{{ channel.sent }}</td>
+                                <td>{{ channel.delivered }} <small>({{ (channel.delivered_rate * 100)|round(1) }}%)</small></td>
+                                <td>{{ channel.failed }}</td>
+                                <td>{{ channel.opened }} <small>({{ (channel.opened_rate * 100)|round(1) }}%)</small></td>
+                                <td>{{ channel.link_clicked }} <small>({{ (channel.link_clicked_rate * 100)|round(1) }}%)</small></td>
+                                <td>{{ channel.attachment_opened }}</td>
+                                <td>{{ channel.voice_responses }}</td>
+                                <td><a href="{{ channel.metrics_url }}">Open filtered metrics</a></td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="11">No channel metrics have been recorded for this campaign.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <h5 class="mb-3">Target Activity History</h5>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr><th>Target</th><th>Channel</th><th>Delivery</th><th>Engagement</th><th>Recent Activity</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for target in reporting.target_activity %}
+                            <tr class="tr-shadow" id="target-{{ target.target_id }}">
+                                <td>
+                                    {{ target.display_name or target.name }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ target.department or "Unassigned" }}</small>
+                                </td>
+                                <td><span class="badge badge-secondary">{{ target.channel|upper }}</span></td>
+                                <td>
+                                    {{ target.delivery_status or "unknown" }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ target.delivered }} delivered / {{ target.failed }} failed</small>
+                                </td>
+                                <td>
+                                    <span class="badge badge-light">opened {{ target.opened }}</span>
+                                    <span class="badge badge-light">clicked {{ target.link_clicked }}</span>
+                                    <span class="badge badge-light">attachment {{ target.attachment_opened }}</span>
+                                    <span class="badge badge-light">voice {{ target.voice_responses }}</span>
+                                </td>
+                                <td>
+                                    {% for event in target.history %}
+                                    <div>
+                                        <a href="#event-{{ event.id }}">{{ event.event_type }}</a>
+                                        <span class="badge badge-{{ event.source.badge }}">{{ event.source.label }}</span>
+                                        <small class="form-text text-muted">{{ event.occurred_at }}</small>
+                                    </div>
+                                    {% else %}
+                                    No activity recorded.
+                                    {% endfor %}
+                                </td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="5">No target activity is available for this campaign.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <hr>
                 <h4 class="mb-3">Delivery</h4>
                 <div class="alert alert-secondary" role="alert">
                     <strong>Dry-run mode is selected by default.</strong>
@@ -440,7 +545,7 @@
                 </div>
                 <hr>
                 {% endif %}
-                <h4 class="mb-3">Targets</h4>
+                <h4 class="mb-3" id="targets">Targets</h4>
                 <div class="table-responsive table-responsive-data2">
                     <table class="table table-data2">
                         <thead>
@@ -448,7 +553,7 @@
                         </thead>
                         <tbody>
                             {% for target in targets %}
-                            <tr class="tr-shadow">
+                            <tr class="tr-shadow" id="target-row-{{ target.id }}">
                                 <td>
                                     {{ target.display_name or target.name }}
                                     <br>
@@ -523,24 +628,35 @@
                     </table>
                 </div>
                 <hr>
-                <h4 class="mb-3">Events</h4>
+                <h4 class="mb-3" id="events">Events</h4>
                 <div class="table-responsive table-responsive-data2">
                     <table class="table table-data2">
                         <thead>
-                            <tr><th>When</th><th>Target</th><th>Channel</th><th>Event</th><th>Status</th></tr>
+                            <tr><th>When</th><th>Target</th><th>Channel</th><th>Event</th><th>Status</th><th>Source</th></tr>
                         </thead>
                         <tbody>
-                            {% for event in events %}
-                            <tr class="tr-shadow">
+                            {% for event in reporting.events %}
+                            <tr class="tr-shadow" id="event-{{ event.id }}">
                                 <td>{{ event.occurred_at }}</td>
-                                <td>{{ event.target_display_name or event.target_name or "Campaign" }}</td>
+                                <td>
+                                    {% if event.target_id %}
+                                    <a href="#target-{{ event.target_id }}">{{ event.target_display_name or event.target_name or "Target" }}</a>
+                                    {% else %}
+                                    Campaign
+                                    {% endif %}
+                                </td>
                                 <td>{{ event.channel }}</td>
                                 <td>{{ event.event_type }}</td>
                                 <td>{{ event.delivery_status }}</td>
+                                <td>
+                                    <span class="badge badge-{{ event.source.badge }}">{{ event.source.label }}</span>
+                                    <br>
+                                    <small class="form-text text-muted">{{ event.source.description }}</small>
+                                </td>
                             </tr>
                             <tr class="spacer"></tr>
                             {% else %}
-                            <tr><td colspan="5">No events recorded yet.</td></tr>
+                            <tr><td colspan="6">No events recorded yet.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>

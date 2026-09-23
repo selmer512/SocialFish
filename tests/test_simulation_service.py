@@ -439,6 +439,45 @@ Broken Voice,,,voice,Support,Morgan
         self.assertIn("Authorized training simulation", detail["ai_drafts"][0]["sms_body"])
         self.assertEqual(detail["ai_drafts"][1]["email_subject"], "Training simulation: invoice review")
 
+    def test_campaign_detail_includes_reporting_rollups_and_event_sources(self):
+        target_id = self.conn.execute(
+            """
+            SELECT id
+            FROM simulation_targets
+            WHERE campaign_id = ? AND channel = 'email'
+            LIMIT 1
+            """,
+            (self.campaign_id,),
+        ).fetchone()[0]
+        record_simulation_event(
+            self.conn,
+            self.campaign_id,
+            "queued",
+            target_id=target_id,
+            channel="email",
+            metadata={"mode": "dry_run"},
+            provider="dry_run_email",
+        )
+        record_simulation_event(
+            self.conn,
+            self.campaign_id,
+            "voice_response",
+            channel="voice",
+            provider="twilio",
+            provider_event_id="evt-unit-provider",
+        )
+
+        detail = get_campaign_detail(self.conn, self.campaign_id)
+        reporting = detail["reporting"]
+
+        self.assertIn("delivery_funnel", reporting)
+        self.assertIn("target_activity", reporting)
+        self.assertTrue(any(step["field"] == "queued" for step in reporting["delivery_funnel"]))
+        self.assertTrue(any(row["channel"] == "email" for row in reporting["channels"]))
+        self.assertTrue(any(row["history"] for row in reporting["target_activity"]))
+        self.assertTrue(any(event["source"]["label"] == "Dry-run" for event in reporting["events"]))
+        self.assertTrue(any(event["source"]["label"] == "Real provider" for event in reporting["events"]))
+
     def test_rejects_unknown_event_types(self):
         with self.assertRaises(ValueError):
             record_simulation_event(self.conn, self.campaign_id, "unsupported")

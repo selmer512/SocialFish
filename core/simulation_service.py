@@ -193,6 +193,12 @@ def _safe_json_dumps(value):
     return json.dumps(value or {}, sort_keys=True)
 
 
+def _event_metadata(value):
+    if isinstance(value, dict):
+        return dict(value)
+    return _json_dict(value)
+
+
 def _content_hash(value):
     return hashlib.sha256(_safe_json_dumps(value).encode("utf-8")).hexdigest()
 
@@ -655,18 +661,117 @@ def archive_campaign(conn, campaign_id):
     return get_campaign(conn, campaign_id)
 
 
+def _reporting_event_source(event):
+    metadata = _event_metadata(event.get("metadata"))
+    provider = _normalize_text(event.get("provider"))
+    provider_reference_id = _normalize_text(event.get("provider_reference_id"))
+    provider_event_id = _normalize_text(event.get("provider_event_id"))
+    mode = (_normalize_text(metadata.get("mode")) or "").lower()
+    source = (_normalize_text(metadata.get("source")) or "").lower()
+
+    if mode == "dry_run" or (provider and provider.startswith("dry_run")):
+        return {
+            "label": "Dry-run",
+            "badge": "info",
+            "description": "Recorded by a dry-run delivery job without external traffic.",
+        }
+    if provider or provider_event_id or provider_reference_id:
+        return {
+            "label": "Real provider",
+            "badge": "success",
+            "description": "Recorded from a configured delivery provider or provider webhook.",
+        }
+    if source:
+        return {
+            "label": "Simulated",
+            "badge": "secondary",
+            "description": "Recorded by internal simulation tracking or test tooling.",
+        }
+    return {
+        "label": "Simulated",
+        "badge": "secondary",
+        "description": "Recorded as an internal simulation event.",
+    }
+
+
+def _campaign_reporting(metrics, events, campaign_id):
+    annotated_events = []
+    events_by_target = {}
+    source_counts = {}
+    for event in events:
+        annotated = dict(event)
+        annotated["metadata"] = _event_metadata(event.get("metadata"))
+        annotated["source"] = _reporting_event_source(event)
+        source_counts[annotated["source"]["label"]] = source_counts.get(annotated["source"]["label"], 0) + 1
+        annotated_events.append(annotated)
+        if annotated.get("target_id") is not None:
+            events_by_target.setdefault(annotated["target_id"], []).append(annotated)
+
+    funnel_fields = (
+        ("queued", "Queued", "Targets queued for delivery"),
+        ("sent", "Sent", "Targets sent by the delivery layer"),
+        ("delivered", "Delivered", "Targets with confirmed delivery"),
+        ("failed", "Failed", "Targets with failed delivery"),
+        ("opened", "Opened", "Targets that opened a message"),
+        ("forwarded", "Forwarded", "Targets that forwarded a message"),
+        ("deleted", "Deleted", "Targets that deleted a message"),
+        ("link_clicked", "Clicked", "Targets that clicked a tracked link"),
+        ("attachment_opened", "Attachment", "Targets that opened a tracked attachment"),
+        ("voice_responses", "Voice response", "Voice targets with recorded responses"),
+    )
+    aggregate = metrics["aggregate"]
+    delivery_funnel = [
+        {
+            "field": field,
+            "label": label,
+            "description": description,
+            "count": aggregate.get(field, 0),
+            "rate": aggregate.get("{}_rate".format(field), 0.0),
+            "target_anchor": "targets",
+            "event_anchor": "events",
+        }
+        for field, label, description in funnel_fields
+    ]
+
+    channel_rows = []
+    for channel, bucket in metrics["channels"].items():
+        row = dict(bucket)
+        row["channel"] = channel
+        row["metrics_url"] = "/simulations/metrics?campaign_id={}&channel={}".format(campaign_id, channel)
+        channel_rows.append(row)
+
+    target_activity = []
+    for target in metrics["targets"]:
+        row = dict(target)
+        history = events_by_target.get(target.get("target_id"), [])
+        row["history"] = history[:6]
+        row["event_count"] = len(history)
+        target_activity.append(row)
+
+    return {
+        "delivery_funnel": delivery_funnel,
+        "channels": channel_rows,
+        "target_activity": target_activity,
+        "events": annotated_events,
+        "source_counts": source_counts,
+    }
+
+
 def get_campaign_detail(conn, campaign_id, include_archived_targets=True):
     campaign = get_campaign(conn, campaign_id)
     if not campaign:
         raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
     targets = list_targets(conn, campaign_id, include_archived=include_archived_targets)
     _attach_latest_target_events(conn, targets)
+    metrics = get_campaign_metrics(conn, campaign_id)
+    events = list_simulation_events(conn, campaign_id)
     return {
         "campaign": campaign,
         "targets": targets,
-        "metrics": get_campaign_metrics(conn, campaign_id),
+        "metrics": metrics,
         "import_batches": list_import_batches(conn, campaign_id),
-        "events": list_simulation_events(conn, campaign_id),
+        "events": events,
+        "reporting": _campaign_reporting(metrics, events, campaign_id),
         "ai_drafts": list_ai_campaign_drafts(conn, campaign_id),
         "delivery_providers": list_delivery_provider_settings(conn),
         "delivery_preview": build_delivery_preview(conn, campaign_id, mode="dry_run"),

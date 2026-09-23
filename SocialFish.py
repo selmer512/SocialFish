@@ -730,6 +730,7 @@ def simulation_campaign_detail(campaign_id):
         campaign=detail["campaign"],
         targets=detail["targets"],
         events=detail["events"],
+        reporting=detail["reporting"],
         metrics=detail["metrics"],
         import_batches=detail["import_batches"],
         ai_drafts=detail["ai_drafts"],

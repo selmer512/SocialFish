@@ -42,11 +42,17 @@ This phase modernizes reporting so the Cybersecurity Team can understand campaig
   - Added portfolio summary cards, channel comparison, campaign trend, department summary, and target risk tables with campaign, channel, date range, department, and delivery status filters.
   - Added route coverage for the dashboard shell and filtered campaign reporting render.
 
-- [ ] Enhance campaign detail reporting:
+- [x] Enhance campaign detail reporting:
   - Add a metrics tab or section to campaign detail pages
   - Show delivery funnel counts, per-channel status, and target activity history
   - Include clear distinctions between dry-run, simulated, and real-provider events
   - Link from summary metrics to filtered target/event tables
+
+  Completion notes, 2026-09-23:
+  - Added a Campaign Metrics section to campaign detail pages with delivery funnel rows, per-channel status rows, and per-target activity history.
+  - Added event source labeling for dry-run, simulated, and real-provider events without exposing provider secret material.
+  - Linked funnel rows to the target/event tables and channel rows to filtered Simulation Metrics views.
+  - Added service and route coverage for campaign detail reporting rollups, event source classification, and rendered reporting UI.
 
 - [ ] Add export functionality:
   - Add CSV export for campaign target metrics
