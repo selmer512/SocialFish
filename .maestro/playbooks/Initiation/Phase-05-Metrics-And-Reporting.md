@@ -86,7 +86,12 @@ This phase modernizes reporting so the Cybersecurity Team can understand campaig
   - Added filter assertions for campaign scope, channel, department, delivery status, and date ranges.
   - Added route coverage for empty campaign metrics APIs, target CSV exports, event JSON exports, and printable report rendering while preserving existing seeded campaign export coverage.
 
-- [ ] Run metrics verification:
+- [x] Run metrics verification:
   - Run the metrics/reporting tests
   - Use automated HTTP requests to fetch overview metrics, campaign metrics, CSV export, JSON export, and printable report pages
   - Fix any aggregation, filtering, route, export, or template failures discovered during verification
+
+  Completion notes, 2026-09-23:
+  - Verified metrics/reporting coverage with `python -m unittest tests.test_simulation_service tests.test_simulation_routes tests.test_simulation_smoke`; 53 tests passed.
+  - Verified authenticated Flask test-client requests for overview metrics, campaign metrics, target metrics CSV export, events JSON export, and printable campaign report pages; all returned HTTP 200.
+  - No aggregation, filtering, route, export, or template failures were found during verification.
