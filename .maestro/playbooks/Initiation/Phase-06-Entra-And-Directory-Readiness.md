@@ -23,11 +23,12 @@ This phase prepares SocialFish for Microsoft Entra ID target synchronization wit
   - Covered mock groups/users, staged sync previews, field mapping, Microsoft Graph validation, provider selection, and secret redaction in `tests/test_directory_connectors.py`.
   - Verified with `python -m unittest discover tests`.
 
-- [ ] Add directory settings routes:
+- [x] Add directory settings routes:
   - `GET /integrations/directory` renders directory provider settings and sync status
   - `POST /api/integrations/directory/providers` creates or updates a provider configuration
   - `POST /api/integrations/directory/providers/<id>/test` tests a provider using mock or configured connector behavior
   - `GET /api/integrations/directory/providers/<id>/groups` lists available groups from the selected connector
+  - Completed with authenticated Flask routes in `SocialFish.py`, an initial `templates/admin/directory_integrations.html` settings/status page, and route coverage for mock provider CRUD/test/group listing plus Microsoft Graph safe configuration errors.
 
 - [ ] Add directory sync preview and import routes:
   - `POST /api/integrations/directory/providers/<id>/preview` stages users from selected groups without adding them to campaigns

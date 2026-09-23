@@ -22,17 +22,21 @@ from core.simulation_service import (
     build_delivery_preview,
     create_campaign,
     create_delivery_job_from_campaign,
+    create_directory_provider_settings,
     create_target,
     generate_ai_scenario,
     get_campaign_metrics,
     get_campaign_detail,
     get_delivery_job_status,
     get_delivery_provider_by_key,
+    get_directory_provider_settings,
     get_target_metrics,
     import_targets_csv,
     list_ai_provider_settings,
     list_campaigns,
     list_delivery_provider_settings,
+    list_directory_groups,
+    list_directory_provider_settings,
     list_targets,
     record_provider_webhook_event,
     record_simulation_event,
@@ -42,7 +46,14 @@ from core.simulation_service import (
     update_campaign,
     update_ai_provider_settings,
     update_delivery_provider_settings,
+    update_directory_provider_settings,
     update_target,
+)
+from core.directory_connectors import (
+    DirectoryConnectorError,
+    DirectoryDisabledProviderError,
+    DirectoryProviderConfigurationError,
+    DirectoryProviderTypeError,
 )
 from core.ai_generation import (
     AIContentPolicyError,
@@ -510,6 +521,88 @@ def _delivery_settings_payload(data):
         if setting_name:
             settings[setting_name] = value
     return settings
+
+
+def _payload_list(value):
+    if value is None or value == "":
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return [str(value).strip()]
+
+
+def _payload_dict(value):
+    if value is None or value == "":
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _directory_settings_payload(data):
+    settings = _payload_dict(data.get("settings"))
+    for key, value in data.items():
+        if not key.startswith("setting_"):
+            continue
+        setting_name = key.split("setting_", 1)[1]
+        if setting_name:
+            settings[setting_name] = value
+    return settings
+
+
+def _directory_provider_payload():
+    data = _request_data()
+    return {
+        "provider_id": _optional_int(data.get("provider_id") or data.get("id")),
+        "name": data.get("name"),
+        "provider_type": data.get("provider_type") or "mock_entra",
+        "tenant_id": data.get("tenant_id"),
+        "tenant_name": data.get("tenant_name"),
+        "authority_url": data.get("authority_url"),
+        "client_id": data.get("client_id"),
+        "enabled": _form_bool(data.get("enabled")),
+        "consent_status": data.get("consent_status") or "not_configured",
+        "consented_scopes": _payload_list(data.get("consented_scopes") or data.get("consented_scopes_json")),
+        "selected_groups": _payload_list(data.get("selected_groups") or data.get("selected_groups_json")),
+        "field_mapping": _payload_dict(data.get("field_mapping") or data.get("field_mapping_json")),
+        "settings": _directory_settings_payload(data),
+        "secret_reference": data.get("secret_reference"),
+        "secret": data.get("secret") or data.get("client_secret"),
+    }
+
+
+def _directory_group_response(group):
+    return {
+        "external_group_id": group.external_group_id,
+        "display_name": group.display_name,
+        "description": group.description,
+        "member_count": group.member_count,
+        "metadata": dict(group.metadata or {}),
+    }
+
+
+def _directory_connector_error_response(error):
+    if isinstance(error, DirectoryDisabledProviderError):
+        return _json_error("directory_provider_disabled", str(error), 400)
+    if isinstance(error, DirectoryProviderConfigurationError):
+        return _json_error("directory_provider_configuration", str(error), 400)
+    if isinstance(error, DirectoryProviderTypeError):
+        return _json_error("directory_provider_type", str(error), 400)
+    return _json_error("directory_connector_error", str(error), 502)
 
 # Conta o numero de credenciais salvas no banco
 def countCreds():
@@ -1338,6 +1431,65 @@ def delivery_settings_api():
             return jsonify({'status': 'error', 'message': str(e)}), 400
         flash(str(e), "danger")
         return redirect("/ai-settings#delivery-providers")
+
+
+@app.route("/integrations/directory", methods=['GET'])
+@flask_login.login_required
+def directory_integrations():
+    providers = list_directory_provider_settings(g.db)
+    return render_template(
+        'admin/directory_integrations.html',
+        providers=providers,
+    )
+
+
+@app.route("/api/integrations/directory/providers", methods=['POST'])
+@flask_login.login_required
+def directory_provider_settings_api():
+    payload = _directory_provider_payload()
+    provider_id = payload.pop("provider_id")
+    try:
+        if provider_id is None:
+            provider = create_directory_provider_settings(g.db, **payload)
+        else:
+            provider = update_directory_provider_settings(g.db, provider_id, **payload)
+        return jsonify({"status": "ok", "provider": provider})
+    except (TypeError, ValueError) as e:
+        return _json_error("directory_provider_settings", str(e), 400)
+
+
+@app.route("/api/integrations/directory/providers/<int:provider_id>/test", methods=['POST'])
+@flask_login.login_required
+def directory_provider_test_api(provider_id):
+    provider = get_directory_provider_settings(g.db, provider_id)
+    if not provider:
+        return _json_error("directory_provider_not_found", "Unknown directory provider config id: {}".format(provider_id), 404)
+    try:
+        groups = list_directory_groups(g.db, provider_id)
+        return jsonify({
+            "status": "ok",
+            "provider": provider,
+            "test": {
+                "message": "Directory provider is ready to list groups.",
+                "group_count": len(groups),
+                "mock": provider.get("provider_type") == "mock_entra",
+            },
+        })
+    except DirectoryConnectorError as e:
+        return _directory_connector_error_response(e)
+
+
+@app.route("/api/integrations/directory/providers/<int:provider_id>/groups", methods=['GET'])
+@flask_login.login_required
+def directory_provider_groups_api(provider_id):
+    provider = get_directory_provider_settings(g.db, provider_id)
+    if not provider:
+        return _json_error("directory_provider_not_found", "Unknown directory provider config id: {}".format(provider_id), 404)
+    try:
+        groups = [_directory_group_response(group) for group in list_directory_groups(g.db, provider_id)]
+        return jsonify({"status": "ok", "provider": provider, "groups": groups})
+    except DirectoryConnectorError as e:
+        return _directory_connector_error_response(e)
 
 # pagina para envio de emails
 @app.route("/mail", methods=['GET', 'POST'])

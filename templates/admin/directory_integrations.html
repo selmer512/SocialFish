@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="SocialFish">
+    <meta name="author" content="UndeadSec">
+    <meta name="keywords" content="SocialFish">
+    <title>SocialFish Directory Integrations</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udiL6Yhsx4eFtEzyZmYpJp6kJkQ6N6k4=" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/creds"><i class="fas fa-arrow-left"></i> <strong>SocialFish</strong></a>/Directory Integrations
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    <strong>Authorized internal training simulations only.</strong>
+                    Configure directory providers for target sync previews. Secrets are accepted by the API but are never rendered back in pages or JSON responses.
+                </div>
+                <div class="row">
+                    <div class="col-md-8">
+                        <h3 class="title-5 m-b-35">Directory Provider Settings</h3>
+                    </div>
+                    <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-primary btn-sm" href="/simulations">
+                            <i class="fas fa-shield-alt"></i>&nbsp; Simulation Center
+                        </a>
+                    </div>
+                </div>
+
+                {% if not providers %}
+                <div class="alert alert-secondary" role="alert">
+                    No directory providers have been configured yet. Use <code>/api/integrations/directory/providers</code> to create a mock Entra or Microsoft Graph provider.
+                </div>
+                {% endif %}
+
+                {% for provider in providers %}
+                <form action="/api/integrations/directory/providers" method="POST" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 20px;">
+                    <input type="hidden" name="provider_id" value="{{ provider.id }}">
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Provider</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="text" name="name" value="{{ provider.name }}" class="form-control">
+                            <small class="form-text text-muted">{{ provider.provider_type }} / consent {{ provider.consent_status }}</small>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Provider Type</label></div>
+                        <div class="col-12 col-md-9">
+                            <select name="provider_type" class="form-control">
+                                <option value="mock_entra" {% if provider.provider_type == "mock_entra" %}selected{% endif %}>Mock Entra</option>
+                                <option value="microsoft_graph" {% if provider.provider_type == "microsoft_graph" %}selected{% endif %}>Microsoft Graph</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Tenant</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="text" name="tenant_name" value="{{ provider.tenant_name or '' }}" class="form-control" placeholder="Tenant display name">
+                            <input type="text" name="tenant_id" value="{{ provider.tenant_id or '' }}" class="form-control m-t-10" placeholder="Tenant ID">
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Selected Groups</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="text" name="selected_groups" value="{{ provider.selected_groups|join(',') }}" class="form-control">
+                            <small class="form-text text-muted">Comma-separated group IDs used by preview and sync routes.</small>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Secret</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="password" name="secret" placeholder="{{ 'Configured - enter a new value to replace' if provider.secret_configured else 'Not configured' }}" class="form-control" autocomplete="new-password">
+                            <small class="form-text text-muted">
+                                Secret placeholder: {{ "configured" if provider.secret_configured else "not configured" }}. Existing values are write-only.
+                            </small>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Sync Status</label></div>
+                        <div class="col-12 col-md-9">
+                            <p class="form-control-static">
+                                Last status: {{ provider.last_sync_status or "not synced" }}
+                                {% if provider.last_sync_at %} at {{ provider.last_sync_at }}{% endif %}
+                            </p>
+                            {% if provider.last_error_message %}
+                            <div class="alert alert-warning" role="alert">{{ provider.last_error_message }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Enabled</label></div>
+                        <div class="col-12 col-md-9">
+                            <label class="switch switch-text switch-info switch-pill">
+                                <input type="checkbox" name="enabled" class="switch-input" {% if provider.enabled %}checked{% endif %}>
+                                <span data-on="On" data-off="Off" class="switch-label"></span>
+                                <span class="switch-handle"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="card-footer" style="text-align: right; margin-left: -20px; margin-right: -20px; margin-bottom: -20px;">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="fa fa-dot-circle-o"></i> Save Directory Provider
+                        </button>
+                    </div>
+                </form>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>

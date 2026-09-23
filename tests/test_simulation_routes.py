@@ -968,6 +968,101 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertNotIn("secret_placeholder", payload["provider"])
         self.assertNotIn("delivery-secret-route-test", str(payload))
 
+    def test_directory_settings_routes_create_test_and_list_groups_without_echoing_secret(self):
+        empty_page = self.client.get("/integrations/directory")
+        self.assertEqual(empty_page.status_code, 200)
+        self.assertIn(b"Directory Provider Settings", empty_page.data)
+        self.assertIn(b"No directory providers have been configured yet.", empty_page.data)
+
+        create_response = self.client.post(
+            "/api/integrations/directory/providers",
+            json={
+                "name": "Route Mock Entra",
+                "provider_type": "mock_entra",
+                "enabled": True,
+                "consent_status": "granted",
+                "selected_groups": ["group-finance"],
+                "secret": "directory-secret-route-test",
+            },
+        )
+        created = create_response.get_json()
+        provider_id = created["provider"]["id"]
+
+        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(created["status"], "ok")
+        self.assertEqual(created["provider"]["name"], "Route Mock Entra")
+        self.assertTrue(created["provider"]["enabled"])
+        self.assertTrue(created["provider"]["secret_configured"])
+        self.assertEqual(created["provider"]["selected_groups"], ["group-finance"])
+        self.assertNotIn("secret_placeholder", created["provider"])
+        self.assertNotIn("directory-secret-route-test", str(created))
+
+        settings_page = self.client.get("/integrations/directory")
+        self.assertEqual(settings_page.status_code, 200)
+        self.assertIn(b"Route Mock Entra", settings_page.data)
+        self.assertIn(b"group-finance", settings_page.data)
+        self.assertIn(b"Secret placeholder: configured", settings_page.data)
+        self.assertNotIn(b"directory-secret-route-test", settings_page.data)
+
+        test_response = self.client.post(
+            "/api/integrations/directory/providers/{}/test".format(provider_id),
+            json={},
+        )
+        test_payload = test_response.get_json()
+        self.assertEqual(test_response.status_code, 200)
+        self.assertEqual(test_payload["status"], "ok")
+        self.assertEqual(test_payload["test"]["group_count"], 3)
+        self.assertTrue(test_payload["test"]["mock"])
+
+        groups_response = self.client.get(
+            "/api/integrations/directory/providers/{}/groups".format(provider_id)
+        )
+        groups_payload = groups_response.get_json()
+        self.assertEqual(groups_response.status_code, 200)
+        self.assertEqual(groups_payload["status"], "ok")
+        self.assertEqual(
+            [group["external_group_id"] for group in groups_payload["groups"]],
+            ["group-finance", "group-engineering", "group-operations"],
+        )
+        self.assertNotIn("directory-secret-route-test", str(groups_payload))
+
+        update_response = self.client.post(
+            "/api/integrations/directory/providers",
+            json={
+                "provider_id": provider_id,
+                "name": "Route Mock Entra Updated",
+                "provider_type": "mock_entra",
+                "enabled": True,
+                "selected_groups": ["group-engineering"],
+            },
+        )
+        updated = update_response.get_json()
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(updated["provider"]["name"], "Route Mock Entra Updated")
+        self.assertEqual(updated["provider"]["selected_groups"], ["group-engineering"])
+        self.assertTrue(updated["provider"]["secret_configured"])
+
+    def test_directory_graph_route_fails_safely_with_actionable_error(self):
+        create_response = self.client.post(
+            "/api/integrations/directory/providers",
+            json={
+                "name": "Route Graph Shell",
+                "provider_type": "microsoft_graph",
+                "enabled": True,
+            },
+        )
+        provider_id = create_response.get_json()["provider"]["id"]
+
+        groups_response = self.client.get(
+            "/api/integrations/directory/providers/{}/groups".format(provider_id)
+        )
+        payload = groups_response.get_json()
+
+        self.assertEqual(groups_response.status_code, 400)
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["error"]["type"], "directory_provider_configuration")
+        self.assertIn("tenant_id", payload["error"]["message"])
+
     def test_campaign_management_routes_create_update_detail_and_archive(self):
         create_response = self.client.post(
             "/simulations/campaigns",
