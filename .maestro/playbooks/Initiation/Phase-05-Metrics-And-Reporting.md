@@ -66,10 +66,14 @@ This phase modernizes reporting so the Cybersecurity Team can understand campaig
   - Added recursive event metadata redaction for secrets, tokens, credentials, passwords, and API keys before JSON export.
   - Added route coverage for CSV, JSON, print report rendering, and redaction behavior.
 
-- [ ] Add structured reporting documentation while implementing dashboards:
+- [x] Add structured reporting documentation while implementing dashboards:
   - Create `docs/features/simulation-metrics.md` with YAML front matter using type `reference`, tags for `metrics`, `reporting`, and `simulations`
   - Include wiki-links to `[[Simulation-Delivery-Tracking]]`, `[[Simulation-Campaigns]]`, and `[[AI-Scenario-Generation]]`
   - Document the event taxonomy, metric formulas, filters, export formats, and dry-run interpretation
+
+  Completion notes, 2026-09-23:
+  - Added `docs/features/simulation-metrics.md` with structured reference front matter and the requested wiki-links.
+  - Documented reporting surfaces, normalized event taxonomy, metric formulas, filters, CSV/JSON/print export formats, and dry-run interpretation.
 
 - [ ] Add automated metrics and reporting coverage:
   - Test aggregation math for each tracked event type
