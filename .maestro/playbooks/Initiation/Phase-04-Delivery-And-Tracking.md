@@ -85,10 +85,14 @@ This phase adds simulation delivery orchestration and event tracking for email, 
   - Added delivery provider configuration forms to AI Settings with dry-run/readiness guidance and write-only secret handling.
   - Verified with `python -m unittest tests.test_simulation_routes` and `python -m unittest discover tests`.
 
-- [ ] Add structured feature documentation while implementing delivery:
+- [x] Add structured feature documentation while implementing delivery:
   - Create `docs/features/simulation-delivery-tracking.md` with YAML front matter using type `reference`, tags for `delivery`, `metrics`, and `simulations`
   - Include wiki-links to `[[Simulation-Campaigns]]`, `[[AI-Scenario-Generation]]`, and `[[Simulation-Metrics]]`
   - Document dry-run behavior, provider readiness checks, tracking endpoints, and event taxonomy
+
+  Completed 2026-09-23:
+  - Added `docs/features/simulation-delivery-tracking.md` with reference front matter, requested tags, and wiki-links.
+  - Documented dry-run delivery behavior, provider readiness checks, tracking endpoints, status APIs, and the event taxonomy.
 
 - [ ] Add automated delivery and tracking coverage:
   - Test dry-run delivery job creation for email, SMS, and voice
