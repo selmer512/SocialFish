@@ -56,7 +56,7 @@ This phase prepares SocialFish for Microsoft Entra ID target synchronization wit
   - Completed with campaign-scoped duplicate contact enforcement across manual, CSV, and directory sources; additive target source metadata fields; directory group metadata preservation; campaign detail source/department/group filters; and route/service coverage.
   - Verified with `python -m unittest discover tests`.
 
-- [ ] Add structured directory documentation while implementing the UI:
+- [x] Add structured directory documentation while implementing the UI:
   - Create `docs/features/entra-directory-integration.md` with YAML front matter using type `reference`, tags for `entra`, `directory`, and `targets`
   - Include wiki-links to `[[Simulation-Campaigns]]`, `[[Simulation-Target-Import]]`, and `[[Simulation-Metrics]]`
   - Document mock mode, future Microsoft Graph settings, field mapping, sync preview, and duplicate handling
