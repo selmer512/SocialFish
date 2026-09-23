@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="SocialFish">
+    <meta name="author" content="UndeadSec">
+    <meta name="keywords" content="SocialFish">
+    <title>SocialFish Directory Sync Job</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udiL6Yhsx4eFtEzyZmYpJp6kJkQ6N6k4=" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/integrations/directory"><i class="fas fa-arrow-left"></i> <strong>Directory Integrations</strong></a>/Sync Job {{ sync_job.job.id }}
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    <strong>{{ sync_job.provider.name }}</strong>
+                    {{ sync_job.job.job_type }} job finished with status
+                    <span class="badge badge-primary">{{ sync_job.job.status }}</span>.
+                </div>
+
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="alert alert-secondary" role="alert">
+                            <strong>{{ sync_job.job.total_users }}</strong><br>Directory users
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="alert alert-secondary" role="alert">
+                            <strong>{{ sync_job.job.staged_count }}</strong><br>Staged
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="alert alert-secondary" role="alert">
+                            <strong>{{ sync_job.job.imported_count }}</strong><br>Imported
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="alert alert-secondary" role="alert">
+                            <strong>{{ sync_job.job.skipped_count }}</strong><br>Skipped
+                        </div>
+                    </div>
+                </div>
+
+                {% if sync_job.job.validation_errors %}
+                <h4 class="title-5 m-b-20">Validation Issues</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr><th>User</th><th>Issue</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for issue in sync_job.job.validation_errors %}
+                            <tr>
+                                <td>{{ issue.external_user_id }}</td>
+                                <td>{{ issue.message }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+
+                <h4 class="title-5 m-b-20">Staged Users</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Department</th>
+                                <th>Status</th>
+                                <th>Imported Target</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in sync_job.staged_users %}
+                            <tr>
+                                <td>{{ user.display_name }}</td>
+                                <td>{{ user.mail or user.user_principal_name }}</td>
+                                <td>{{ user.department or "" }}</td>
+                                <td><span class="badge badge-secondary">{{ user.validation_status }}</span></td>
+                                <td>{{ user.imported_target_id or "" }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="5">No users were staged for this job.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <h4 class="title-5 m-b-20">Audit History</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Event</th>
+                                <th>Severity</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for event in sync_job.audit_events %}
+                            <tr>
+                                <td>{{ event.created_at }}</td>
+                                <td>{{ event.event_type }}</td>
+                                <td>{{ event.severity }}</td>
+                                <td>{{ event.message }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4">No audit events were recorded.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>

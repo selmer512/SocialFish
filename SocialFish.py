@@ -30,6 +30,7 @@ from core.simulation_service import (
     get_delivery_job_status,
     get_delivery_provider_by_key,
     get_directory_provider_settings,
+    get_directory_sync_job_results,
     get_target_metrics,
     import_targets_csv,
     list_ai_provider_settings,
@@ -38,11 +39,13 @@ from core.simulation_service import (
     list_directory_groups,
     list_directory_provider_settings,
     list_targets,
+    preview_directory_sync,
     record_provider_webhook_event,
     record_simulation_event,
     record_tracking_token_event,
     run_delivery_job,
     save_ai_campaign_draft,
+    sync_directory_users,
     update_campaign,
     update_ai_provider_settings,
     update_delivery_provider_settings,
@@ -603,6 +606,25 @@ def _directory_connector_error_response(error):
     if isinstance(error, DirectoryProviderTypeError):
         return _json_error("directory_provider_type", str(error), 400)
     return _json_error("directory_connector_error", str(error), 502)
+
+
+def _directory_sync_request_payload():
+    data = _request_data()
+    return {
+        "group_ids": _payload_list(
+            data.get("group_ids")
+            or data.get("selected_groups")
+            or data.get("selected_groups_json")
+        ),
+        "campaign_id": _optional_int(data.get("campaign_id")),
+    }
+
+
+def _directory_requested_by():
+    user_id = getattr(flask_login.current_user, "id", None)
+    if user_id:
+        return str(user_id)
+    return "authenticated-admin"
 
 # Conta o numero de credenciais salvas no banco
 def countCreds():
@@ -1490,6 +1512,56 @@ def directory_provider_groups_api(provider_id):
         return jsonify({"status": "ok", "provider": provider, "groups": groups})
     except DirectoryConnectorError as e:
         return _directory_connector_error_response(e)
+
+
+@app.route("/api/integrations/directory/providers/<int:provider_id>/preview", methods=['POST'])
+@flask_login.login_required
+def directory_provider_preview_api(provider_id):
+    if not get_directory_provider_settings(g.db, provider_id):
+        return _json_error("directory_provider_not_found", "Unknown directory provider config id: {}".format(provider_id), 404)
+    payload = _directory_sync_request_payload()
+    try:
+        result = preview_directory_sync(
+            g.db,
+            provider_id,
+            group_ids=payload["group_ids"],
+            requested_by=_directory_requested_by(),
+        )
+        return jsonify({"status": "ok", "sync_job": result})
+    except DirectoryConnectorError as e:
+        return _directory_connector_error_response(e)
+    except ValueError as e:
+        return _json_error("directory_sync_preview", str(e), 400)
+
+
+@app.route("/api/integrations/directory/providers/<int:provider_id>/sync", methods=['POST'])
+@flask_login.login_required
+def directory_provider_sync_api(provider_id):
+    if not get_directory_provider_settings(g.db, provider_id):
+        return _json_error("directory_provider_not_found", "Unknown directory provider config id: {}".format(provider_id), 404)
+    payload = _directory_sync_request_payload()
+    try:
+        result = sync_directory_users(
+            g.db,
+            provider_id,
+            group_ids=payload["group_ids"],
+            campaign_id=payload["campaign_id"],
+            requested_by=_directory_requested_by(),
+        )
+        return jsonify({"status": "ok", "sync_job": result})
+    except DirectoryConnectorError as e:
+        return _directory_connector_error_response(e)
+    except ValueError as e:
+        return _json_error("directory_sync_import", str(e), 400)
+
+
+@app.route("/integrations/directory/sync-jobs/<int:job_id>", methods=['GET'])
+@flask_login.login_required
+def directory_sync_job_results(job_id):
+    result = get_directory_sync_job_results(g.db, job_id)
+    if not result:
+        return _json_error("directory_sync_job_not_found", "Unknown directory sync job id: {}".format(job_id), 404)
+    return render_template("admin/directory_sync_job.html", sync_job=result)
 
 # pagina para envio de emails
 @app.route("/mail", methods=['GET', 'POST'])

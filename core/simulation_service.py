@@ -7,6 +7,8 @@ import json
 import re
 import secrets
 
+from core.db_migration import SIMULATION_DEMO_SLUG
+
 
 VALID_SIMULATION_CHANNELS = {"email", "sms", "voice"}
 VALID_CAMPAIGN_STATUSES = {"draft", "active", "paused", "completed", "archived"}
@@ -443,6 +445,36 @@ def _directory_provider_response(row):
     provider["secret_configured"] = provider.get("secret_placeholder") == "configured"
     provider.pop("secret_placeholder", None)
     return provider
+
+
+def _directory_sync_job_response(row):
+    if not row:
+        return None
+    job = dict(row)
+    job["selected_groups"] = _json_list(job.pop("selected_groups_json", None))
+    job["validation_errors"] = _json_list(job.pop("validation_errors_json", None))
+    return job
+
+
+def _staged_directory_user_response(row):
+    if not row:
+        return None
+    user = dict(row)
+    user["business_phones"] = _json_list(user.pop("business_phones_json", None))
+    user["groups"] = _json_list(user.pop("groups_json", None))
+    user["source_group_ids"] = _json_list(user.pop("source_group_ids_json", None))
+    user["validation_errors"] = _json_list(user.pop("validation_errors_json", None))
+    user["target_payload"] = _json_dict(user.pop("target_payload_json", None))
+    user["active"] = _bool(user.get("active"))
+    return user
+
+
+def _directory_sync_audit_event_response(row):
+    if not row:
+        return None
+    event = dict(row)
+    event["metadata"] = _json_dict(event.pop("metadata_json", None))
+    return event
 
 
 def _delivery_job_response(row):
@@ -2853,6 +2885,415 @@ def map_directory_user_to_target(conn, provider_id, user):
     from core.directory_connectors import map_user_to_target_with_provider_settings
 
     return map_user_to_target_with_provider_settings(_directory_provider_or_error(conn, provider_id), user)
+
+
+def _directory_default_campaign_id(conn):
+    campaign = _row_to_dict(
+        conn.execute(
+            "SELECT id FROM simulation_campaigns WHERE slug = ?",
+            (SIMULATION_DEMO_SLUG,),
+        )
+    )
+    if campaign:
+        return campaign["id"]
+    first = _row_to_dict(conn.execute("SELECT id FROM simulation_campaigns ORDER BY id ASC LIMIT 1"))
+    if first:
+        return first["id"]
+    raise ValueError("Directory sync import requires at least one simulation campaign.")
+
+
+def _create_directory_sync_job(conn, provider_id, job_type, selected_groups=None, requested_by=None):
+    now = _utc_now()
+    cursor = conn.execute(
+        """
+        INSERT INTO directory_sync_jobs (
+            provider_id, job_type, status, selected_groups_json, requested_by,
+            started_at, created_at, updated_at
+        )
+        VALUES (?, ?, 'running', ?, ?, ?, ?, ?)
+        """,
+        (
+            provider_id,
+            job_type,
+            json.dumps(list(selected_groups or []), sort_keys=True),
+            _normalize_text(requested_by),
+            now,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def _record_directory_sync_audit_event(
+    conn,
+    provider_id,
+    sync_job_id,
+    event_type,
+    message,
+    severity="info",
+    actor=None,
+    metadata=None,
+):
+    conn.execute(
+        """
+        INSERT INTO directory_sync_audit_events (
+            provider_id, sync_job_id, event_type, severity, actor, message,
+            metadata_json, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            provider_id,
+            sync_job_id,
+            event_type,
+            severity,
+            _normalize_text(actor),
+            _normalize_text(message),
+            _safe_json_dumps(metadata),
+            _utc_now(),
+        ),
+    )
+    conn.commit()
+
+
+def _update_directory_sync_job(conn, job_id, status, **counts):
+    now = _utc_now()
+    existing = _row_to_dict(conn.execute("SELECT * FROM directory_sync_jobs WHERE id = ?", (job_id,)))
+    if not existing:
+        raise ValueError("Unknown directory sync job id: {}".format(job_id))
+    validation_errors = counts.get("validation_errors")
+    conn.execute(
+        """
+        UPDATE directory_sync_jobs
+        SET status = ?, total_groups = ?, total_users = ?, staged_count = ?,
+            imported_count = ?, skipped_count = ?, invalid_count = ?,
+            duplicate_count = ?, validation_errors_json = ?, completed_at = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            status,
+            int(counts.get("total_groups", existing["total_groups"]) or 0),
+            int(counts.get("total_users", existing["total_users"]) or 0),
+            int(counts.get("staged_count", existing["staged_count"]) or 0),
+            int(counts.get("imported_count", existing["imported_count"]) or 0),
+            int(counts.get("skipped_count", existing["skipped_count"]) or 0),
+            int(counts.get("invalid_count", existing["invalid_count"]) or 0),
+            int(counts.get("duplicate_count", existing["duplicate_count"]) or 0),
+            json.dumps(list(validation_errors or _json_list(existing["validation_errors_json"])), sort_keys=True),
+            now,
+            now,
+            job_id,
+        ),
+    )
+    conn.commit()
+
+
+def _update_directory_provider_sync_state(conn, provider_id, job_id, status, error_message=None):
+    now = _utc_now()
+    conn.execute(
+        """
+        UPDATE directory_providers
+        SET last_sync_status = ?, last_sync_job_id = ?, last_sync_at = ?,
+            last_error_message = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            status,
+            job_id,
+            now,
+            _normalize_text(error_message),
+            now,
+            provider_id,
+        ),
+    )
+    conn.commit()
+
+
+def _stage_directory_sync_users(conn, provider, job_id, result):
+    validation_errors = []
+    staged_count = 0
+    invalid_count = 0
+    for user in result.users:
+        user_errors = []
+        target_payload = {}
+        if not _normalize_text(user.external_user_id):
+            user_errors.append("Directory user is missing an external user id.")
+        try:
+            target_payload = map_directory_user_to_target(conn, provider["id"], user)
+            _normalize_target_payload(target_payload, source="directory")
+        except ValueError as exc:
+            user_errors.append(str(exc))
+        status = "invalid" if user_errors else "valid"
+        invalid_count += 1 if user_errors else 0
+        validation_errors.extend(
+            {
+                "external_user_id": user.external_user_id,
+                "message": error,
+            }
+            for error in user_errors
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO staged_directory_users (
+                provider_id, sync_job_id, external_user_id, user_principal_name,
+                mail, display_name, given_name, surname, job_title, department,
+                office_location, mobile_phone, business_phones_json, manager,
+                groups_json, source_group_ids_json, active, validation_status,
+                validation_errors_json, target_payload_json, imported_target_id,
+                staged_at, imported_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)
+            """,
+            (
+                provider["id"],
+                job_id,
+                user.external_user_id,
+                user.user_principal_name,
+                user.mail,
+                user.display_name,
+                user.given_name,
+                user.surname,
+                user.job_title,
+                user.department,
+                user.office_location,
+                user.mobile_phone,
+                json.dumps(list(user.business_phones), sort_keys=True),
+                user.manager,
+                json.dumps(list(user.groups), sort_keys=True),
+                json.dumps(list(user.source_group_ids), sort_keys=True),
+                1 if user.active else 0,
+                status,
+                json.dumps(user_errors, sort_keys=True),
+                _safe_json_dumps(target_payload),
+                _utc_now(),
+            ),
+        )
+        staged_count += 1
+    conn.commit()
+    return {
+        "staged_count": staged_count,
+        "invalid_count": invalid_count,
+        "validation_errors": validation_errors,
+    }
+
+
+def _target_contact_exists(conn, email=None, phone=None):
+    filters = []
+    params = []
+    normalized_email = _normalize_email(email) if email else None
+    normalized_phone = _normalize_phone(phone) if phone else None
+    if normalized_email:
+        filters.append("LOWER(email) = ?")
+        params.append(normalized_email)
+    if normalized_phone:
+        filters.append("phone = ?")
+        params.append(normalized_phone)
+    if not filters:
+        return False
+    row = _row_to_dict(
+        conn.execute(
+            """
+            SELECT id
+            FROM simulation_targets
+            WHERE archived_at IS NULL
+              AND source = 'directory'
+              AND ({})
+            LIMIT 1
+            """.format(" OR ".join(filters)),
+            params,
+        )
+    )
+    return row is not None
+
+
+def preview_directory_sync(conn, provider_id, group_ids=None, requested_by=None):
+    provider = _directory_provider_or_error(conn, provider_id)
+    result = preview_directory_users(conn, provider_id, group_ids=group_ids)
+    job_id = _create_directory_sync_job(conn, provider_id, "preview", result.selected_group_ids, requested_by)
+    _record_directory_sync_audit_event(
+        conn,
+        provider_id,
+        job_id,
+        "preview_started",
+        "Directory sync preview started.",
+        actor=requested_by,
+        metadata={"selected_groups": list(result.selected_group_ids)},
+    )
+    stage_counts = _stage_directory_sync_users(conn, provider, job_id, result)
+    status = "completed_with_errors" if stage_counts["invalid_count"] else "completed"
+    _update_directory_sync_job(
+        conn,
+        job_id,
+        status,
+        total_groups=len(result.groups),
+        total_users=len(result.users),
+        staged_count=stage_counts["staged_count"],
+        invalid_count=stage_counts["invalid_count"],
+        validation_errors=stage_counts["validation_errors"],
+    )
+    _update_directory_provider_sync_state(conn, provider_id, job_id, status)
+    _record_directory_sync_audit_event(
+        conn,
+        provider_id,
+        job_id,
+        "preview_completed",
+        "Directory sync preview staged {} users.".format(stage_counts["staged_count"]),
+        actor=requested_by,
+        metadata={"invalid_count": stage_counts["invalid_count"]},
+    )
+    return get_directory_sync_job_results(conn, job_id)
+
+
+def sync_directory_users(conn, provider_id, group_ids=None, campaign_id=None, requested_by=None):
+    provider = _directory_provider_or_error(conn, provider_id)
+    destination_campaign_id = campaign_id or _directory_default_campaign_id(conn)
+    if not get_campaign(conn, destination_campaign_id):
+        raise ValueError("Unknown simulation campaign id: {}".format(destination_campaign_id))
+    result = sync_directory_staged_users(conn, provider_id, group_ids=group_ids)
+    job_id = _create_directory_sync_job(conn, provider_id, "sync", result.selected_group_ids, requested_by)
+    _record_directory_sync_audit_event(
+        conn,
+        provider_id,
+        job_id,
+        "sync_started",
+        "Directory sync import started.",
+        actor=requested_by,
+        metadata={"campaign_id": destination_campaign_id, "selected_groups": list(result.selected_group_ids)},
+    )
+    stage_counts = _stage_directory_sync_users(conn, provider, job_id, result)
+    imported_count = 0
+    skipped_count = 0
+    duplicate_count = 0
+    staged_users = _rows_to_dicts(
+        conn.execute(
+            """
+            SELECT id, active, validation_status, target_payload_json
+            FROM staged_directory_users
+            WHERE sync_job_id = ?
+            ORDER BY id ASC
+            """,
+            (job_id,),
+        )
+    )
+    for staged in staged_users:
+        payload = _json_dict(staged["target_payload_json"])
+        if not _bool(staged["active"]) or staged["validation_status"] != "valid":
+            skipped_count += 1
+            continue
+        if _target_contact_exists(conn, email=payload.get("email"), phone=payload.get("phone")):
+            duplicate_count += 1
+            skipped_count += 1
+            continue
+        target = create_target(conn, destination_campaign_id, **payload)
+        conn.execute(
+            """
+            UPDATE staged_directory_users
+            SET imported_target_id = ?, imported_at = ?
+            WHERE id = ?
+            """,
+            (target["id"], _utc_now(), staged["id"]),
+        )
+        conn.commit()
+        imported_count += 1
+    status = "completed_with_errors" if stage_counts["invalid_count"] else "completed"
+    _update_directory_sync_job(
+        conn,
+        job_id,
+        status,
+        total_groups=len(result.groups),
+        total_users=len(result.users),
+        staged_count=stage_counts["staged_count"],
+        imported_count=imported_count,
+        skipped_count=skipped_count,
+        invalid_count=stage_counts["invalid_count"],
+        duplicate_count=duplicate_count,
+        validation_errors=stage_counts["validation_errors"],
+    )
+    _update_directory_provider_sync_state(conn, provider_id, job_id, status)
+    _record_directory_sync_audit_event(
+        conn,
+        provider_id,
+        job_id,
+        "sync_completed",
+        "Directory sync imported {} users and skipped {} users.".format(imported_count, skipped_count),
+        actor=requested_by,
+        metadata={
+            "campaign_id": destination_campaign_id,
+            "imported_count": imported_count,
+            "skipped_count": skipped_count,
+            "duplicate_count": duplicate_count,
+        },
+    )
+    return get_directory_sync_job_results(conn, job_id)
+
+
+def get_directory_sync_job_results(conn, job_id):
+    job = _directory_sync_job_response(
+        _row_to_dict(
+            conn.execute(
+                """
+                SELECT
+                    id, provider_id, job_type, status, selected_groups_json,
+                    total_groups, total_users, staged_count, imported_count,
+                    skipped_count, invalid_count, duplicate_count,
+                    validation_errors_json, requested_by, started_at,
+                    completed_at, created_at, updated_at
+                FROM directory_sync_jobs
+                WHERE id = ?
+                """,
+                (job_id,),
+            )
+        )
+    )
+    if not job:
+        return None
+    provider = get_directory_provider_settings(conn, job["provider_id"])
+    staged_users = [
+        _staged_directory_user_response(row)
+        for row in _rows_to_dicts(
+            conn.execute(
+                """
+                SELECT
+                    id, provider_id, sync_job_id, external_user_id,
+                    user_principal_name, mail, display_name, given_name,
+                    surname, job_title, department, office_location,
+                    mobile_phone, business_phones_json, manager, groups_json,
+                    source_group_ids_json, active, validation_status,
+                    validation_errors_json, target_payload_json,
+                    imported_target_id, staged_at, imported_at
+                FROM staged_directory_users
+                WHERE sync_job_id = ?
+                ORDER BY display_name ASC, id ASC
+                """,
+                (job_id,),
+            )
+        )
+    ]
+    audit_events = [
+        _directory_sync_audit_event_response(row)
+        for row in _rows_to_dicts(
+            conn.execute(
+                """
+                SELECT
+                    id, provider_id, sync_job_id, event_type, severity,
+                    actor, message, metadata_json, created_at
+                FROM directory_sync_audit_events
+                WHERE sync_job_id = ?
+                ORDER BY id ASC
+                """,
+                (job_id,),
+            )
+        )
+    ]
+    return {
+        "job": job,
+        "provider": provider,
+        "staged_users": staged_users,
+        "audit_events": audit_events,
+    }
 
 
 def list_ai_provider_settings(conn):

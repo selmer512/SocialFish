@@ -1063,6 +1063,106 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(payload["error"]["type"], "directory_provider_configuration")
         self.assertIn("tenant_id", payload["error"]["message"])
 
+    def test_directory_preview_sync_job_and_import_routes_preserve_audit_history(self):
+        campaign_id = self._campaign_id()
+        create_response = self.client.post(
+            "/api/integrations/directory/providers",
+            json={
+                "name": "Route Sync Mock Entra",
+                "provider_type": "mock_entra",
+                "enabled": True,
+                "consent_status": "granted",
+                "selected_groups": ["group-engineering"],
+            },
+        )
+        provider_id = create_response.get_json()["provider"]["id"]
+
+        preview_response = self.client.post(
+            "/api/integrations/directory/providers/{}/preview".format(provider_id),
+            json={"group_ids": ["group-finance"]},
+        )
+        preview_payload = preview_response.get_json()
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_payload["status"], "ok")
+        self.assertEqual(preview_payload["sync_job"]["job"]["job_type"], "preview")
+        self.assertEqual(preview_payload["sync_job"]["job"]["staged_count"], 2)
+        self.assertEqual(preview_payload["sync_job"]["job"]["imported_count"], 0)
+        self.assertEqual(
+            [user["external_user_id"] for user in preview_payload["sync_job"]["staged_users"]],
+            ["mock-user-avery-stone", "mock-user-morgan-patel"],
+        )
+        self.assertEqual(
+            [event["event_type"] for event in preview_payload["sync_job"]["audit_events"]],
+            ["preview_started", "preview_completed"],
+        )
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            preview_imports = conn.execute(
+                "SELECT COUNT(*) FROM simulation_targets WHERE source = 'directory'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(preview_imports, 0)
+
+        sync_response = self.client.post(
+            "/api/integrations/directory/providers/{}/sync".format(provider_id),
+            json={"group_ids": ["group-engineering"], "campaign_id": campaign_id},
+        )
+        sync_payload = sync_response.get_json()
+        sync_job_id = sync_payload["sync_job"]["job"]["id"]
+
+        self.assertEqual(sync_response.status_code, 200)
+        self.assertEqual(sync_payload["status"], "ok")
+        self.assertEqual(sync_payload["sync_job"]["job"]["job_type"], "sync")
+        self.assertEqual(sync_payload["sync_job"]["job"]["staged_count"], 2)
+        self.assertEqual(sync_payload["sync_job"]["job"]["imported_count"], 2)
+        self.assertEqual(sync_payload["sync_job"]["job"]["skipped_count"], 0)
+        self.assertTrue(all(user["imported_target_id"] for user in sync_payload["sync_job"]["staged_users"]))
+        self.assertEqual(
+            [event["event_type"] for event in sync_payload["sync_job"]["audit_events"]],
+            ["sync_started", "sync_completed"],
+        )
+
+        job_page = self.client.get("/integrations/directory/sync-jobs/{}".format(sync_job_id))
+        self.assertEqual(job_page.status_code, 200)
+        self.assertIn(b"Directory Sync Job", job_page.data)
+        self.assertIn(b"sync_completed", job_page.data)
+        self.assertIn(b"Riley Chen", job_page.data)
+
+        duplicate_response = self.client.post(
+            "/api/integrations/directory/providers/{}/sync".format(provider_id),
+            json={"group_ids": ["group-engineering"], "campaign_id": campaign_id},
+        )
+        duplicate_payload = duplicate_response.get_json()
+
+        self.assertEqual(duplicate_response.status_code, 200)
+        self.assertEqual(duplicate_payload["sync_job"]["job"]["imported_count"], 0)
+        self.assertEqual(duplicate_payload["sync_job"]["job"]["duplicate_count"], 2)
+        self.assertEqual(duplicate_payload["sync_job"]["job"]["skipped_count"], 2)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            imported = conn.execute(
+                """
+                SELECT name, email, source, campaign_id
+                FROM simulation_targets
+                WHERE source = 'directory'
+                ORDER BY name ASC
+                """
+            ).fetchall()
+            audit_count = conn.execute(
+                "SELECT COUNT(*) FROM directory_sync_audit_events"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        self.assertEqual(len(imported), 2)
+        self.assertEqual([row[0] for row in imported], ["Morgan Patel", "Riley Chen"])
+        self.assertTrue(all(row[2] == "directory" and row[3] == campaign_id for row in imported))
+        self.assertEqual(audit_count, 6)
+
     def test_campaign_management_routes_create_update_detail_and_archive(self):
         create_response = self.client.post(
             "/simulations/campaigns",
