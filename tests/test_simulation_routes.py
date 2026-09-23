@@ -1075,7 +1075,12 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn("tenant_id", payload["error"]["message"])
 
     def test_directory_preview_sync_job_and_import_routes_preserve_audit_history(self):
-        campaign_id = self._campaign_id()
+        conn = sqlite3.connect(self.db_path)
+        try:
+            import_campaign = create_campaign(conn, "Directory Route Import Campaign", selected_channels=["email"])
+            campaign_id = import_campaign["id"]
+        finally:
+            conn.close()
         create_response = self.client.post(
             "/api/integrations/directory/providers",
             json={
@@ -1147,6 +1152,18 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Sync History", history_page.data)
         self.assertIn("/integrations/directory/sync-jobs/{}".format(sync_job_id).encode(), history_page.data)
 
+        campaign_page = self.client.get(
+            "/simulations/campaigns/{}?source=directory&department=Engineering&group=group-engineering#targets".format(
+                campaign_id
+            )
+        )
+        self.assertEqual(campaign_page.status_code, 200)
+        self.assertIn(b"Directory Group", campaign_page.data)
+        self.assertIn(b"Engineering Awareness Pilot", campaign_page.data)
+        self.assertIn(b"mock-user-riley-chen", campaign_page.data)
+        self.assertIn(b"source", campaign_page.data)
+        self.assertIn(b"directory", campaign_page.data)
+
         duplicate_response = self.client.post(
             "/api/integrations/directory/providers/{}/sync".format(provider_id),
             json={"group_ids": ["group-engineering"], "campaign_id": campaign_id},
@@ -1162,7 +1179,7 @@ class SimulationRoutesTest(unittest.TestCase):
         try:
             imported = conn.execute(
                 """
-                SELECT name, email, source, campaign_id
+                SELECT name, email, source, campaign_id, source_reference, source_metadata_json
                 FROM simulation_targets
                 WHERE source = 'directory'
                 ORDER BY name ASC
@@ -1177,6 +1194,8 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(len(imported), 2)
         self.assertEqual([row[0] for row in imported], ["Morgan Patel", "Riley Chen"])
         self.assertTrue(all(row[2] == "directory" and row[3] == campaign_id for row in imported))
+        self.assertTrue(all(row[4].startswith("mock-user-") for row in imported))
+        self.assertTrue(all("group-engineering" in row[5] for row in imported))
         self.assertEqual(audit_count, 6)
 
     def test_campaign_management_routes_create_update_detail_and_archive(self):
@@ -1250,6 +1269,9 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Unknown columns are reported as validation errors.", detail_response.data)
         self.assertIn(b'name="targets_csv"', detail_response.data)
         self.assertIn(b"Targets", detail_response.data)
+        self.assertIn(b"All sources", detail_response.data)
+        self.assertIn(b"All departments", detail_response.data)
+        self.assertIn(b"Directory Group", detail_response.data)
         self.assertIn(b"Events", detail_response.data)
         self.assertIn(b"Archive", detail_response.data)
         self.assertIn(b"AI Draft History", detail_response.data)

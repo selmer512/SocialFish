@@ -339,6 +339,14 @@ class SimulationServiceTest(unittest.TestCase):
                 email="not-an-email",
                 channel="email",
             )
+        with self.assertRaisesRegex(ValueError, "Duplicate target contact"):
+            create_target(
+                self.conn,
+                campaign["id"],
+                name="Duplicate Manual",
+                phone="+15550102222",
+                channel="sms",
+            )
 
         archived = archive_target(self.conn, target["id"])
         self.assertFalse(archived["active"])

@@ -363,6 +363,14 @@ def _normalize_active(active):
     return 1 if active is None or bool(active) else 0
 
 
+def _normalize_source_metadata(value):
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    return _json_dict(value)
+
+
 def _normalize_target_payload(payload, default_channel="email", source="manual"):
     payload = payload or {}
     name = _normalize_text(payload.get("name")) or _normalize_text(payload.get("display_name"))
@@ -390,6 +398,8 @@ def _normalize_target_payload(payload, default_channel="email", source="manual")
         "department": _normalize_text(payload.get("department")),
         "manager": _normalize_text(payload.get("manager")),
         "source": _normalize_text(payload.get("source")) or source,
+        "source_reference": _normalize_text(payload.get("source_reference")),
+        "source_metadata": _normalize_source_metadata(payload.get("source_metadata")),
         "active": _normalize_active(payload.get("active")),
         "channel": channel,
     }
@@ -514,6 +524,7 @@ def _target_response(row):
     if not row:
         return None
     target = dict(row)
+    target["source_metadata"] = _json_dict(target.pop("source_metadata_json", None))
     for field in ("opened", "forwarded", "deleted", "link_clicked", "attachment_opened", "active"):
         if field in target:
             target[field] = _bool(target[field])
@@ -801,11 +812,17 @@ def _campaign_reporting(metrics, events, campaign_id):
     }
 
 
-def get_campaign_detail(conn, campaign_id, include_archived_targets=True):
+def get_campaign_detail(conn, campaign_id, include_archived_targets=True, target_filters=None):
     campaign = get_campaign(conn, campaign_id)
     if not campaign:
         raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
-    targets = list_targets(conn, campaign_id, include_archived=include_archived_targets)
+    target_filter_options = get_campaign_target_filter_options(conn, campaign_id)
+    targets = list_targets(
+        conn,
+        campaign_id,
+        include_archived=include_archived_targets,
+        filters=target_filters,
+    )
     _attach_latest_target_events(conn, targets)
     metrics = get_campaign_metrics(conn, campaign_id)
     events = list_simulation_events(conn, campaign_id)
@@ -820,6 +837,8 @@ def get_campaign_detail(conn, campaign_id, include_archived_targets=True):
         "delivery_providers": list_delivery_provider_settings(conn),
         "delivery_preview": build_delivery_preview(conn, campaign_id, mode="dry_run"),
         "delivery_jobs": list_delivery_jobs(conn, campaign_id=campaign_id),
+        "target_filters": _normalize_target_filters(target_filters),
+        "target_filter_options": target_filter_options,
     }
 
 
@@ -888,16 +907,35 @@ def list_simulation_events(conn, campaign_id=None):
     )
 
 
-def list_targets(conn, campaign_id=None, include_archived=False):
+def _normalize_target_filters(filters=None):
+    filters = filters or {}
+    return {
+        "source": _normalize_text(filters.get("source")),
+        "department": _normalize_text(filters.get("department")),
+        "group": _normalize_text(filters.get("group") or filters.get("group_id")),
+    }
+
+
+def list_targets(conn, campaign_id=None, include_archived=False, filters=None):
     """Return targets for one campaign or all campaigns."""
+    target_filters = _normalize_target_filters(filters)
     params = []
-    filters = []
+    clauses = []
     if campaign_id is not None:
-        filters.append("t.campaign_id = ?")
+        clauses.append("t.campaign_id = ?")
         params.append(campaign_id)
     if not include_archived:
-        filters.append("t.archived_at IS NULL")
-    where = "WHERE {}".format(" AND ".join(filters)) if filters else ""
+        clauses.append("t.archived_at IS NULL")
+    if target_filters["source"]:
+        clauses.append("t.source = ?")
+        params.append(target_filters["source"])
+    if target_filters["department"]:
+        clauses.append("COALESCE(NULLIF(TRIM(t.department), ''), 'Unassigned') = ?")
+        params.append(target_filters["department"])
+    if target_filters["group"]:
+        clauses.append("EXISTS (SELECT 1 FROM json_each(t.source_metadata_json, '$.source_group_ids') WHERE value = ?)")
+        params.append(target_filters["group"])
+    where = "WHERE {}".format(" AND ".join(clauses)) if clauses else ""
 
     cursor = conn.execute(
         f"""
@@ -912,6 +950,8 @@ def list_targets(conn, campaign_id=None, include_archived=False):
             t.department,
             t.manager,
             t.source,
+            t.source_reference,
+            t.source_metadata_json,
             t.active,
             t.import_batch_id,
             t.channel,
@@ -940,6 +980,42 @@ def list_targets(conn, campaign_id=None, include_archived=False):
     return [_target_response(row) for row in _rows_to_dicts(cursor)]
 
 
+def get_campaign_target_filter_options(conn, campaign_id):
+    """Return campaign target filter values for campaign detail review."""
+    rows = _rows_to_dicts(
+        conn.execute(
+            """
+            SELECT source, department, source_metadata_json
+            FROM simulation_targets
+            WHERE campaign_id = ? AND archived_at IS NULL
+            ORDER BY source ASC, department ASC
+            """,
+            (campaign_id,),
+        )
+    )
+    sources = sorted({row["source"] for row in rows if _normalize_text(row.get("source"))})
+    departments = sorted({
+        _department_key(row.get("department"))
+        for row in rows
+    })
+    groups = {}
+    for row in rows:
+        metadata = _json_dict(row.get("source_metadata_json"))
+        group_ids = metadata.get("source_group_ids") or []
+        group_names = metadata.get("groups") or []
+        for index, group_id in enumerate(group_ids):
+            label = group_names[index] if index < len(group_names) else group_id
+            groups[group_id] = label
+    return {
+        "sources": sources,
+        "departments": departments,
+        "groups": [
+            {"id": group_id, "label": groups[group_id]}
+            for group_id in sorted(groups, key=lambda item: groups[item])
+        ],
+    }
+
+
 def get_target(conn, target_id):
     target = _row_to_dict(
         conn.execute(
@@ -947,7 +1023,8 @@ def get_target(conn, target_id):
             SELECT
                 t.id, t.campaign_id, c.name AS campaign_name, t.name,
                 t.display_name, t.email, t.phone, t.department, t.manager,
-                t.source, t.active, t.import_batch_id, t.channel,
+                t.source, t.source_reference, t.source_metadata_json,
+                t.active, t.import_batch_id, t.channel,
                 t.delivery_status, t.opened, t.forwarded, t.deleted,
                 t.link_clicked, t.attachment_opened, t.delivered_at,
                 t.opened_at, t.forwarded_at, t.deleted_at, t.link_clicked_at,
@@ -962,20 +1039,67 @@ def get_target(conn, target_id):
     return _target_response(target)
 
 
+def _target_contact_conflict(conn, campaign_id, email=None, phone=None, exclude_target_id=None):
+    filters = []
+    params = [campaign_id]
+    normalized_email = _normalize_email(email) if email else None
+    normalized_phone = _normalize_phone(phone) if phone else None
+    if normalized_email:
+        filters.append("LOWER(email) = ?")
+        params.append(normalized_email)
+    if normalized_phone:
+        filters.append("phone = ?")
+        params.append(normalized_phone)
+    if not filters:
+        return None
+    query = """
+        SELECT id, display_name, name, source
+        FROM simulation_targets
+        WHERE campaign_id = ?
+          AND archived_at IS NULL
+          AND ({})
+    """.format(" OR ".join(filters))
+    if exclude_target_id is not None:
+        query += " AND id != ?"
+        params.append(exclude_target_id)
+    query += " LIMIT 1"
+    return _row_to_dict(conn.execute(query, params))
+
+
+def _raise_on_target_contact_conflict(conn, campaign_id, payload, exclude_target_id=None):
+    conflict = _target_contact_conflict(
+        conn,
+        campaign_id,
+        email=payload.get("email"),
+        phone=payload.get("phone"),
+        exclude_target_id=exclude_target_id,
+    )
+    if conflict:
+        name = conflict.get("display_name") or conflict.get("name") or "another target"
+        raise ValueError(
+            "Duplicate target contact already exists in this campaign: {} from {}.".format(
+                name,
+                conflict.get("source") or "unknown source",
+            )
+        )
+
+
 def create_target(conn, campaign_id, **fields):
     campaign = get_campaign(conn, campaign_id)
     if not campaign:
         raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
     payload = _normalize_target_payload(fields, default_channel=campaign["channel"], source=fields.get("source", "manual"))
+    _raise_on_target_contact_conflict(conn, campaign_id, payload)
     now = _utc_now()
     cursor = conn.execute(
         """
         INSERT INTO simulation_targets (
             campaign_id, name, display_name, email, phone, department,
-            manager, source, active, import_batch_id, channel,
+            manager, source, source_reference, source_metadata_json,
+            active, import_batch_id, channel,
             delivery_status, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
         """,
         (
             campaign_id,
@@ -986,6 +1110,8 @@ def create_target(conn, campaign_id, **fields):
             payload["department"],
             payload["manager"],
             payload["source"],
+            payload["source_reference"],
+            _safe_json_dumps(payload["source_metadata"]),
             payload["active"],
             fields.get("import_batch_id"),
             payload["channel"],
@@ -1010,18 +1136,21 @@ def update_target(conn, target_id, **fields):
         "department": fields.get("department", existing["department"]),
         "manager": fields.get("manager", existing["manager"]),
         "source": fields.get("source", existing["source"]),
+        "source_reference": fields.get("source_reference", existing.get("source_reference")),
+        "source_metadata": fields.get("source_metadata", existing.get("source_metadata")),
         "active": fields.get("active", existing["active"]),
         "channel": fields.get("channel", existing["channel"]),
     }
     normalized = _normalize_target_payload(payload, default_channel=existing["channel"], source=existing["source"])
+    _raise_on_target_contact_conflict(conn, existing["campaign_id"], normalized, exclude_target_id=target_id)
     now = _utc_now()
     conn.execute(
         """
         UPDATE simulation_targets
         SET
             name = ?, display_name = ?, email = ?, phone = ?,
-            department = ?, manager = ?, source = ?, active = ?,
-            channel = ?, updated_at = ?
+            department = ?, manager = ?, source = ?, source_reference = ?,
+            source_metadata_json = ?, active = ?, channel = ?, updated_at = ?
         WHERE id = ?
         """,
         (
@@ -1032,6 +1161,8 @@ def update_target(conn, target_id, **fields):
             normalized["department"],
             normalized["manager"],
             normalized["source"],
+            normalized["source_reference"] or existing.get("source_reference"),
+            _safe_json_dumps(normalized["source_metadata"] or existing.get("source_metadata")),
             normalized["active"],
             normalized["channel"],
             now,
@@ -1107,7 +1238,8 @@ def parse_target_csv(csv_content, default_channel="email"):
 
     rows = []
     errors = list(header_errors)
-    seen_contacts = set()
+    seen_emails = set()
+    seen_phones = set()
     total_rows = 0
 
     for row_number, row in enumerate(reader, start=2):
@@ -1119,14 +1251,14 @@ def parse_target_csv(csv_content, default_channel="email"):
         }
         try:
             payload = _normalize_target_payload(normalized_row, default_channel=default_channel, source="csv")
-            contact_key = (
-                payload["email"] or "",
-                payload["phone"] or "",
-                payload["channel"],
-            )
-            if contact_key in seen_contacts:
+            if payload["email"] and payload["email"] in seen_emails:
                 raise ValueError("Duplicate target contact in CSV.")
-            seen_contacts.add(contact_key)
+            if payload["phone"] and payload["phone"] in seen_phones:
+                raise ValueError("Duplicate target contact in CSV.")
+            if payload["email"]:
+                seen_emails.add(payload["email"])
+            if payload["phone"]:
+                seen_phones.add(payload["phone"])
             payload["row_number"] = row_number
             rows.append(payload)
         except ValueError as exc:
@@ -1145,21 +1277,15 @@ def import_targets_csv(conn, campaign_id, csv_content, original_filename=None, s
         raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
 
     parsed = parse_target_csv(csv_content, default_channel=campaign["channel"])
-    existing_contacts = {
-        (target.get("email") or "", target.get("phone") or "", target.get("channel"))
-        for target in list_targets(conn, campaign_id, include_archived=False)
-    }
     importable_rows = []
     errors = list(parsed["errors"])
     for row in parsed["rows"]:
-        contact_key = (row["email"] or "", row["phone"] or "", row["channel"])
-        if contact_key in existing_contacts:
+        if _target_contact_conflict(conn, campaign_id, email=row["email"], phone=row["phone"]):
             errors.append({
                 "row": row["row_number"],
                 "message": "Duplicate target contact already exists in this campaign.",
             })
         else:
-            existing_contacts.add(contact_key)
             importable_rows.append(row)
 
     now = _utc_now()
@@ -1201,6 +1327,11 @@ def import_targets_csv(conn, campaign_id, csv_content, original_filename=None, s
             department=row["department"],
             manager=row["manager"],
             source="csv",
+            source_reference=original_filename,
+            source_metadata={
+                "original_filename": _normalize_text(original_filename),
+                "row_number": row["row_number"],
+            },
             active=row["active"],
             channel=row["channel"],
             import_batch_id=batch_id,
@@ -3023,6 +3154,16 @@ def _stage_directory_sync_users(conn, provider, job_id, result):
             user_errors.append("Directory user is missing an external user id.")
         try:
             target_payload = map_directory_user_to_target(conn, provider["id"], user)
+            target_payload["source_reference"] = user.external_user_id
+            target_payload["source_metadata"] = {
+                "provider_id": provider["id"],
+                "provider_name": provider.get("name"),
+                "provider_type": provider.get("provider_type"),
+                "external_user_id": user.external_user_id,
+                "user_principal_name": user.user_principal_name,
+                "groups": list(user.groups),
+                "source_group_ids": list(user.source_group_ids),
+            }
             _normalize_target_payload(target_payload, source="directory")
         except ValueError as exc:
             user_errors.append(str(exc))
@@ -3078,35 +3219,6 @@ def _stage_directory_sync_users(conn, provider, job_id, result):
         "invalid_count": invalid_count,
         "validation_errors": validation_errors,
     }
-
-
-def _target_contact_exists(conn, email=None, phone=None):
-    filters = []
-    params = []
-    normalized_email = _normalize_email(email) if email else None
-    normalized_phone = _normalize_phone(phone) if phone else None
-    if normalized_email:
-        filters.append("LOWER(email) = ?")
-        params.append(normalized_email)
-    if normalized_phone:
-        filters.append("phone = ?")
-        params.append(normalized_phone)
-    if not filters:
-        return False
-    row = _row_to_dict(
-        conn.execute(
-            """
-            SELECT id
-            FROM simulation_targets
-            WHERE archived_at IS NULL
-              AND source = 'directory'
-              AND ({})
-            LIMIT 1
-            """.format(" OR ".join(filters)),
-            params,
-        )
-    )
-    return row is not None
 
 
 def preview_directory_sync(conn, provider_id, group_ids=None, requested_by=None):
@@ -3183,7 +3295,12 @@ def sync_directory_users(conn, provider_id, group_ids=None, campaign_id=None, re
         if not _bool(staged["active"]) or staged["validation_status"] != "valid":
             skipped_count += 1
             continue
-        if _target_contact_exists(conn, email=payload.get("email"), phone=payload.get("phone")):
+        if _target_contact_conflict(
+            conn,
+            destination_campaign_id,
+            email=payload.get("email"),
+            phone=payload.get("phone"),
+        ):
             duplicate_count += 1
             skipped_count += 1
             continue

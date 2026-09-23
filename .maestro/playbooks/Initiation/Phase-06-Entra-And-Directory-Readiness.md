@@ -48,11 +48,13 @@ This phase prepares SocialFish for Microsoft Entra ID target synchronization wit
   - Covered the rendered UI, navigation entry, secret non-echo behavior, and sync history link in `tests/test_simulation_routes.py`.
   - Verified with `python -m unittest discover tests`.
 
-- [ ] Connect directory imports to campaign targeting:
+- [x] Connect directory imports to campaign targeting:
   - Allow campaign target selection from manually created targets, CSV-imported targets, and directory-synced targets
   - Add filters for source, department, and group mapping on campaign detail pages
   - Preserve source metadata on imported targets
   - Prevent duplicate targets when the same email or phone number appears across sources
+  - Completed with campaign-scoped duplicate contact enforcement across manual, CSV, and directory sources; additive target source metadata fields; directory group metadata preservation; campaign detail source/department/group filters; and route/service coverage.
+  - Verified with `python -m unittest discover tests`.
 
 - [ ] Add structured directory documentation while implementing the UI:
   - Create `docs/features/entra-directory-integration.md` with YAML front matter using type `reference`, tags for `entra`, `directory`, and `targets`

@@ -950,7 +950,12 @@ def create_simulation_campaign():
 @flask_login.login_required
 def simulation_campaign_detail(campaign_id):
     try:
-        detail = get_campaign_detail(g.db, campaign_id)
+        target_filters = {
+            "source": request.args.get("source"),
+            "department": request.args.get("department"),
+            "group": request.args.get("group"),
+        }
+        detail = get_campaign_detail(g.db, campaign_id, target_filters=target_filters)
     except ValueError as e:
         flash(str(e), "danger")
         return redirect("/simulations/campaigns")
@@ -966,6 +971,8 @@ def simulation_campaign_detail(campaign_id):
         delivery_preview=detail["delivery_preview"],
         delivery_jobs=detail["delivery_jobs"],
         delivery_providers=detail["delivery_providers"],
+        target_filters=detail["target_filters"],
+        target_filter_options=detail["target_filter_options"],
         statuses=("draft", "active", "paused", "completed"),
         channels=("email", "sms", "voice"),
         target_csv_required_columns=TARGET_CSV_REQUIRED_COLUMNS,

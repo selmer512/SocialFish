@@ -515,6 +515,15 @@
                                 </button>
                             </div>
                         </form>
+                        <div style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 20px;">
+                            <h5 class="mb-3"><i class="fas fa-address-book"></i> Directory Import</h5>
+                            <p class="mb-3">
+                                Directory-synced targets import into this campaign with source metadata for provider, user, and group review.
+                            </p>
+                            <a class="btn btn-outline-secondary btn-sm" href="/integrations/directory">
+                                <i class="fas fa-sync-alt"></i> Open Directory Integrations
+                            </a>
+                        </div>
                     </div>
                 </div>
                 {% if import_batches %}
@@ -555,6 +564,45 @@
                 <hr>
                 {% endif %}
                 <h4 class="mb-3" id="targets">Targets</h4>
+                <form action="/simulations/campaigns/{{ campaign.id }}#targets" method="GET" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 16px; margin-bottom: 20px;">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label class="form-control-label">Source</label>
+                            <select name="source" class="form-control">
+                                <option value="">All sources</option>
+                                {% for source in target_filter_options.sources %}
+                                <option value="{{ source }}" {% if target_filters.source == source %}selected{% endif %}>{{ source|title }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-control-label">Department</label>
+                            <select name="department" class="form-control">
+                                <option value="">All departments</option>
+                                {% for department in target_filter_options.departments %}
+                                <option value="{{ department }}" {% if target_filters.department == department %}selected{% endif %}>{{ department }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-control-label">Directory Group</label>
+                            <select name="group" class="form-control">
+                                <option value="">All groups</option>
+                                {% for group in target_filter_options.groups %}
+                                <option value="{{ group.id }}" {% if target_filters.group == group.id %}selected{% endif %}>{{ group.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3" style="padding-top: 32px;">
+                            <button type="submit" class="btn btn-primary btn-sm">
+                                <i class="fas fa-filter"></i> Apply
+                            </button>
+                            <a href="/simulations/campaigns/{{ campaign.id }}#targets" class="btn btn-outline-secondary btn-sm">
+                                <i class="fas fa-times"></i> Clear
+                            </a>
+                        </div>
+                    </div>
+                </form>
                 <div class="table-responsive table-responsive-data2">
                     <table class="table table-data2">
                         <thead>
@@ -598,7 +646,15 @@
                                     No events yet
                                     {% endif %}
                                 </td>
-                                <td>{{ target.source }}</td>
+                                <td>
+                                    <span class="badge badge-info">{{ target.source }}</span>
+                                    {% if target.source_reference %}
+                                    <br><small class="form-text text-muted">{{ target.source_reference }}</small>
+                                    {% endif %}
+                                    {% for group in target.source_metadata.groups or [] %}
+                                    <br><small class="form-text text-muted">{{ group }}</small>
+                                    {% endfor %}
+                                </td>
                                 <td>
                                     <form action="/simulations/targets/{{ target.id }}" method="POST" class="form-horizontal" style="min-width: 260px;">
                                         <input type="hidden" name="source" value="{{ target.source }}">
