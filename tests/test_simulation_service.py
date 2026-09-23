@@ -19,6 +19,7 @@ from core.simulation_service import (
     generate_ai_scenario,
     list_ai_generation_audits,
     list_ai_provider_settings,
+    list_delivery_provider_settings,
     list_campaigns,
     list_simulation_events,
     list_targets,
@@ -30,6 +31,7 @@ from core.simulation_service import (
     save_ai_campaign_draft,
     update_campaign,
     update_ai_provider_settings,
+    update_delivery_provider_settings,
     update_target,
 )
 
@@ -519,8 +521,26 @@ Broken Voice,,,voice,Support,Morgan
         self.assertEqual(completed["job"]["delivered_count"], 4)
         self.assertEqual(completed["job"]["failed_count"], 0)
         self.assertEqual(len(completed["processed_attempts"]), 4)
+        self.assertEqual(
+            {
+                channel: len([attempt for attempt in completed["attempts"] if attempt["channel"] == channel])
+                for channel in ("email", "sms", "voice")
+            },
+            {"email": 2, "sms": 1, "voice": 1},
+        )
         self.assertTrue(all(attempt["status"] == "delivered" for attempt in completed["attempts"]))
         self.assertTrue(all(attempt["provider_response"]["dry_run"] for attempt in completed["attempts"]))
+        self.assertEqual(
+            {
+                attempt["channel"]: attempt["provider"]
+                for attempt in completed["attempts"]
+            },
+            {
+                "email": "dry_run_email",
+                "sms": "dry_run_sms",
+                "voice": "dry_run_voice",
+            },
+        )
 
         delivered_events = [
             event for event in list_simulation_events(self.conn, self.campaign_id)
@@ -551,31 +571,42 @@ Broken Voice,,,voice,Support,Morgan
         self.assertEqual(status["job"]["delivered_count"], 4)
         self.assertEqual(len(status["tracking_tokens"]), 12)
 
-    def test_tracking_token_events_update_token_counts_and_target_rollups(self):
+    def test_tracking_token_events_update_token_counts_and_target_rollups_for_all_token_types(self):
         created = create_delivery_job_from_campaign(self.conn, self.campaign_id)
-        token = next(
-            item for item in created["tracking_tokens"]
-            if item["token_type"] == "link"
-        )
+        expected = {
+            "open": ("opened", "opened", "opened_at"),
+            "link": ("link_click", "link_clicked", "link_clicked_at"),
+            "attachment": ("attachment_open", "attachment_opened", "attachment_opened_at"),
+        }
 
-        result = record_tracking_token_event(
-            self.conn,
-            token["token"],
-            token_type="link",
-            metadata={"source": "unit-test"},
-        )
+        for token_type, (event_type, flag_column, timestamp_column) in expected.items():
+            token = next(
+                item for item in created["tracking_tokens"]
+                if item["token_type"] == token_type
+            )
 
-        self.assertEqual(result["event"]["event_type"], "link_click")
-        self.assertEqual(result["event"]["tracking_token_id"], token["id"])
-        self.assertEqual(result["token"]["event_count"], 1)
-        self.assertIsNotNone(result["token"]["first_seen_at"])
+            result = record_tracking_token_event(
+                self.conn,
+                token["token"],
+                token_type=token_type,
+                metadata={"source": "unit-test"},
+            )
 
-        target = self.conn.execute(
-            "SELECT link_clicked, link_clicked_at FROM simulation_targets WHERE id = ?",
-            (token["target_id"],),
-        ).fetchone()
-        self.assertEqual(target[0], 1)
-        self.assertIsNotNone(target[1])
+            self.assertEqual(result["event"]["event_type"], event_type)
+            self.assertEqual(result["event"]["tracking_token_id"], token["id"])
+            self.assertEqual(result["event"]["delivery_job_id"], created["job"]["id"])
+            self.assertEqual(result["token"]["event_count"], 1)
+            self.assertIsNotNone(result["token"]["first_seen_at"])
+
+            target = self.conn.execute(
+                "SELECT {}, {} FROM simulation_targets WHERE id = ?".format(
+                    flag_column,
+                    timestamp_column,
+                ),
+                (token["target_id"],),
+            ).fetchone()
+            self.assertEqual(target[0], 1)
+            self.assertIsNotNone(target[1])
 
     def test_provider_webhook_records_valid_provider_event(self):
         created = create_delivery_job_from_campaign(self.conn, self.campaign_id)
@@ -599,6 +630,80 @@ Broken Voice,,,voice,Support,Morgan
         self.assertEqual(result["event"]["event_type"], "opened")
         self.assertEqual(result["event"]["provider_reference_id"], result["provider"]["id"])
         self.assertEqual(result["tracking_token"]["event_count"], 1)
+
+    def test_configured_real_provider_shell_records_failed_attempt_without_external_delivery(self):
+        smtp_provider = next(
+            provider
+            for provider in list_delivery_provider_settings(self.conn)
+            if provider["provider_key"] == "smtp_email"
+        )
+        created = create_delivery_job_from_campaign(
+            self.conn,
+            self.campaign_id,
+            provider_ids={"email": smtp_provider["id"]},
+            max_retries=1,
+        )
+        job_id = created["job"]["id"]
+
+        first_run = run_delivery_job(self.conn, job_id)
+        failed_attempts = [
+            attempt for attempt in first_run["attempts"]
+            if attempt["channel"] == "email"
+        ]
+
+        self.assertEqual(first_run["job"]["status"], "completed_with_errors")
+        self.assertEqual(first_run["job"]["failed_count"], 2)
+        self.assertEqual(first_run["job"]["delivered_count"], 2)
+        self.assertTrue(all(attempt["status"] == "failed" for attempt in failed_attempts))
+        self.assertTrue(all("disabled" in attempt["error_message"] for attempt in failed_attempts))
+        self.assertTrue(all(attempt["provider_response"] == {} for attempt in failed_attempts))
+
+        failed_event_count = self.conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM simulation_events
+            WHERE delivery_job_id = ? AND event_type = 'failed'
+            """,
+            (job_id,),
+        ).fetchone()[0]
+        self.assertEqual(failed_event_count, 2)
+
+        second_run = run_delivery_job(self.conn, job_id)
+        retried_attempts = [
+            attempt for attempt in second_run["attempts"]
+            if attempt["channel"] == "email"
+        ]
+        self.assertEqual(len(second_run["processed_attempts"]), 2)
+        self.assertTrue(all(attempt["retry_count"] == 1 for attempt in retried_attempts))
+
+    def test_incomplete_enabled_provider_shell_records_clear_configuration_failure(self):
+        sms_provider = next(
+            provider
+            for provider in list_delivery_provider_settings(self.conn)
+            if provider["provider_key"] == "sms_api"
+        )
+        configured_provider = update_delivery_provider_settings(
+            self.conn,
+            sms_provider["id"],
+            enabled=True,
+            settings={"sender_id": "TRAINING"},
+        )
+        created = create_delivery_job_from_campaign(
+            self.conn,
+            self.campaign_id,
+            provider_ids={"sms": configured_provider["id"]},
+        )
+
+        status = run_delivery_job(self.conn, created["job"]["id"])
+        failed_sms = next(
+            attempt for attempt in status["attempts"]
+            if attempt["channel"] == "sms"
+        )
+
+        self.assertEqual(status["job"]["status"], "completed_with_errors")
+        self.assertEqual(failed_sms["status"], "failed")
+        self.assertIn("api_key", failed_sms["error_message"])
+        self.assertEqual(failed_sms["provider_response"], {})
 
 
 if __name__ == "__main__":

@@ -94,11 +94,16 @@ This phase adds simulation delivery orchestration and event tracking for email, 
   - Added `docs/features/simulation-delivery-tracking.md` with reference front matter, requested tags, and wiki-links.
   - Documented dry-run delivery behavior, provider readiness checks, tracking endpoints, status APIs, and the event taxonomy.
 
-- [ ] Add automated delivery and tracking coverage:
+- [x] Add automated delivery and tracking coverage:
   - Test dry-run delivery job creation for email, SMS, and voice
   - Test idempotent reruns do not duplicate completed attempts
   - Test open, link-click, attachment-open, and webhook event recording
   - Test disabled or incomplete providers fail safely with clear UI/API errors
+
+  Completed 2026-09-23:
+  - Expanded service coverage for dry-run delivery job channel distribution, provider recording, tracking-token events for open/link/attachment, idempotent reruns, webhook event recording, and safe real-provider shell failures.
+  - Expanded route coverage for disabled and incomplete provider selections so API payloads and rendered status pages expose failed attempts with clear error messages and no external delivery.
+  - Verified with `python -m unittest tests.test_simulation_service`, `python -m unittest tests.test_simulation_routes`, and `python -m unittest discover tests`.
 
 - [ ] Run delivery verification:
   - Run the delivery and tracking tests

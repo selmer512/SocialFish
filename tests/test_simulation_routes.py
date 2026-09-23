@@ -72,6 +72,16 @@ class SimulationRoutesTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def _delivery_provider_id(self, provider_key):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            return conn.execute(
+                "SELECT id FROM simulation_channel_providers WHERE provider_key = ?",
+                (provider_key,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
     def test_authenticated_pages_render(self):
         simulations = self.client.get("/simulations")
         campaigns = self.client.get("/simulations/campaigns")
@@ -405,6 +415,77 @@ class SimulationRoutesTest(unittest.TestCase):
 
         self.assertEqual(missing_preview.status_code, 400)
         self.assertEqual(missing_preview_payload["error"]["type"], "delivery_preview_error")
+
+    def test_delivery_start_with_disabled_provider_reports_failed_attempts(self):
+        campaign_id = self._campaign_id()
+        smtp_provider_id = self._delivery_provider_id("smtp_email")
+
+        response = self.client.post(
+            "/simulations/campaigns/{}/deliveries/start".format(campaign_id),
+            json={
+                "mode": "provider",
+                "provider_ids": {"email": smtp_provider_id},
+                "max_retries": 0,
+            },
+        )
+        payload = response.get_json()
+        job_id = payload["delivery"]["job"]["id"]
+        email_attempts = [
+            attempt for attempt in payload["delivery"]["attempts"]
+            if attempt["channel"] == "email"
+        ]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["delivery"]["job"]["status"], "completed_with_errors")
+        self.assertEqual(payload["delivery"]["job"]["failed_count"], 2)
+        self.assertTrue(all(attempt["status"] == "failed" for attempt in email_attempts))
+        self.assertTrue(all("disabled" in attempt["error_message"] for attempt in email_attempts))
+        self.assertTrue(all(attempt["provider_response"] == {} for attempt in email_attempts))
+        self.assertNotIn("route-pass", str(payload))
+
+        api_response = self.client.get("/api/simulations/deliveries/{}".format(job_id))
+        api_payload = api_response.get_json()
+        self.assertEqual(api_response.status_code, 200)
+        self.assertEqual(api_payload["delivery"]["job"]["status"], "completed_with_errors")
+        self.assertIn("disabled", str(api_payload["delivery"]["attempts"]))
+
+        page_response = self.client.get("/simulations/deliveries/{}".format(job_id))
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn(b"failed", page_response.data)
+        self.assertIn(b"disabled", page_response.data)
+
+    def test_delivery_start_with_incomplete_enabled_provider_reports_configuration_error(self):
+        campaign_id = self._campaign_id()
+        sms_provider_id = self._delivery_provider_id("sms_api")
+        settings_response = self.client.post(
+            "/api/delivery-settings",
+            json={
+                "provider_id": sms_provider_id,
+                "enabled": True,
+                "setting_sender_id": "TRAINING",
+            },
+        )
+
+        response = self.client.post(
+            "/simulations/campaigns/{}/deliveries/start".format(campaign_id),
+            json={
+                "mode": "provider",
+                "provider_ids": {"sms": sms_provider_id},
+                "max_retries": 0,
+            },
+        )
+        payload = response.get_json()
+        sms_attempt = next(
+            attempt for attempt in payload["delivery"]["attempts"]
+            if attempt["channel"] == "sms"
+        )
+
+        self.assertEqual(settings_response.status_code, 200)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["delivery"]["job"]["status"], "completed_with_errors")
+        self.assertEqual(sms_attempt["status"], "failed")
+        self.assertIn("api_key", sms_attempt["error_message"])
+        self.assertEqual(sms_attempt["provider_response"], {})
 
     def test_tracking_endpoints_record_open_link_and_attachment_events(self):
         campaign_id = self._campaign_id()
