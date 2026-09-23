@@ -38,11 +38,15 @@ This phase prepares SocialFish for Microsoft Entra ID target synchronization wit
   - Completed with persisted preview/sync jobs, staged user validation, directory-target import, duplicate prevention for repeated directory syncs, sync audit events, a sync job review page, and route coverage.
   - Verified with `python -m unittest discover tests`.
 
-- [ ] Build directory integration UI:
+- [x] Build directory integration UI:
   - Add an Integrations or Directory page reachable from the admin navigation
   - Include provider configuration, mock mode, group selection, sync preview, import confirmation, and sync history
   - Display required Microsoft Graph permission names as guidance inside the UI without requiring setup outside the app
   - Keep secret inputs write-only and show placeholders instead of stored values
+  - Completed with an admin navigation link, interactive provider creation/editing, mock/Graph mode controls, group loading, preview/import actions, campaign import confirmation, sync history links, Microsoft Graph permission guidance, and write-only secret placeholders in `templates/admin/directory_integrations.html`.
+  - Added recent sync-job listing support in `core/simulation_service.py` and passed campaigns/history into the directory page from `SocialFish.py`.
+  - Covered the rendered UI, navigation entry, secret non-echo behavior, and sync history link in `tests/test_simulation_routes.py`.
+  - Verified with `python -m unittest discover tests`.
 
 - [ ] Connect directory imports to campaign targeting:
   - Allow campaign target selection from manually created targets, CSV-imported targets, and directory-synced targets

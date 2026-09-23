@@ -38,6 +38,7 @@ from core.simulation_service import (
     list_delivery_provider_settings,
     list_directory_groups,
     list_directory_provider_settings,
+    list_directory_sync_jobs,
     list_targets,
     preview_directory_sync,
     record_provider_webhook_event,
@@ -1459,9 +1460,13 @@ def delivery_settings_api():
 @flask_login.login_required
 def directory_integrations():
     providers = list_directory_provider_settings(g.db)
+    campaigns = list_campaigns(g.db)
+    sync_jobs = list_directory_sync_jobs(g.db, limit=10)
     return render_template(
         'admin/directory_integrations.html',
         providers=providers,
+        campaigns=campaigns,
+        sync_jobs=sync_jobs,
     )
 
 

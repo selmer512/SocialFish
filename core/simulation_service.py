@@ -3296,6 +3296,37 @@ def get_directory_sync_job_results(conn, job_id):
     }
 
 
+def list_directory_sync_jobs(conn, limit=20, provider_id=None):
+    """Return recent directory sync jobs for UI review links."""
+    params = []
+    filters = []
+    if provider_id is not None:
+        filters.append("j.provider_id = ?")
+        params.append(provider_id)
+    params.append(int(limit or 20))
+    where = "WHERE {}".format(" AND ".join(filters)) if filters else ""
+    rows = _rows_to_dicts(
+        conn.execute(
+            f"""
+            SELECT
+                j.id, j.provider_id, p.name AS provider_name, j.job_type,
+                j.status, j.selected_groups_json, j.total_groups, j.total_users,
+                j.staged_count, j.imported_count, j.skipped_count,
+                j.invalid_count, j.duplicate_count, j.validation_errors_json,
+                j.requested_by, j.started_at, j.completed_at, j.created_at,
+                j.updated_at
+            FROM directory_sync_jobs j
+            JOIN directory_providers p ON p.id = j.provider_id
+            {where}
+            ORDER BY j.created_at DESC, j.id DESC
+            LIMIT ?
+            """,
+            params,
+        )
+    )
+    return [_directory_sync_job_response(row) for row in rows]
+
+
 def list_ai_provider_settings(conn):
     cursor = conn.execute(
         """

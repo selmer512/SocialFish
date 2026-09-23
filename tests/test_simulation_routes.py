@@ -330,6 +330,8 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Simulation Center", response.data)
         self.assertIn(b"location.href='/simulations'", response.data)
+        self.assertIn(b"Directory Integrations", response.data)
+        self.assertIn(b"location.href='/integrations/directory'", response.data)
         self.assertIn(b"AI Settings", response.data)
         self.assertIn(b"location.href='/ai-settings'", response.data)
 
@@ -973,6 +975,11 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(empty_page.status_code, 200)
         self.assertIn(b"Directory Provider Settings", empty_page.data)
         self.assertIn(b"No directory providers have been configured yet.", empty_page.data)
+        self.assertIn(b"Add Directory Provider", empty_page.data)
+        self.assertIn(b"Mock Entra", empty_page.data)
+        self.assertIn(b"Microsoft Graph Permissions", empty_page.data)
+        self.assertIn(b"Group.Read.All", empty_page.data)
+        self.assertIn(b"Sync History", empty_page.data)
 
         create_response = self.client.post(
             "/api/integrations/directory/providers",
@@ -1002,6 +1009,10 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Route Mock Entra", settings_page.data)
         self.assertIn(b"group-finance", settings_page.data)
         self.assertIn(b"Secret placeholder: configured", settings_page.data)
+        self.assertIn(b"Group Selection", settings_page.data)
+        self.assertIn(b"Sync Preview", settings_page.data)
+        self.assertIn(b"Confirm Import", settings_page.data)
+        self.assertIn(b"Default campaign", settings_page.data)
         self.assertNotIn(b"directory-secret-route-test", settings_page.data)
 
         test_response = self.client.post(
@@ -1130,6 +1141,11 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Directory Sync Job", job_page.data)
         self.assertIn(b"sync_completed", job_page.data)
         self.assertIn(b"Riley Chen", job_page.data)
+
+        history_page = self.client.get("/integrations/directory")
+        self.assertEqual(history_page.status_code, 200)
+        self.assertIn(b"Sync History", history_page.data)
+        self.assertIn("/integrations/directory/sync-jobs/{}".format(sync_job_id).encode(), history_page.data)
 
         duplicate_response = self.client.post(
             "/api/integrations/directory/providers/{}/sync".format(provider_id),

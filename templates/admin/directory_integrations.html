@@ -11,6 +11,31 @@
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udiL6Yhsx4eFtEzyZmYpJp6kJkQ6N6k4=" crossorigin="anonymous">
     <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
     <link href="/css/theme.css" rel="stylesheet" media="all">
+    <style>
+        .directory-section {
+            border: 1px solid #e5e5e5;
+            padding: 20px;
+            margin-bottom: 20px;
+            background: #fff;
+        }
+        .directory-actions .btn {
+            margin: 2px;
+        }
+        .directory-output {
+            background: #f7f7f7;
+            border: 1px solid #e5e5e5;
+            min-height: 44px;
+            padding: 12px;
+            white-space: pre-wrap;
+        }
+        .group-list {
+            max-height: 220px;
+            overflow-y: auto;
+        }
+        .permission-list li {
+            margin-bottom: 4px;
+        }
+    </style>
 </head>
 <body>
     <br>
@@ -22,8 +47,9 @@
             <div class="card-body card-block">
                 <div class="alert alert-info" role="alert">
                     <strong>Authorized internal training simulations only.</strong>
-                    Configure directory providers for target sync previews. Secrets are accepted by the API but are never rendered back in pages or JSON responses.
+                    Configure directory providers, review synced users, and import targets only after previewing the selected groups.
                 </div>
+
                 <div class="row">
                     <div class="col-md-8">
                         <h3 class="title-5 m-b-35">Directory Provider Settings</h3>
@@ -35,88 +61,355 @@
                     </div>
                 </div>
 
+                <div class="directory-section">
+                    <h4 class="title-5 m-b-20">Add Directory Provider</h4>
+                    <form class="form-horizontal directory-provider-form" data-provider-id="">
+                        <input type="hidden" name="provider_id" value="">
+                        <div class="row form-group">
+                            <div class="col col-md-3"><label class="form-control-label">Provider Name</label></div>
+                            <div class="col-12 col-md-9">
+                                <input type="text" name="name" value="Mock Entra Directory" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-3"><label class="form-control-label">Mode</label></div>
+                            <div class="col-12 col-md-9">
+                                <select name="provider_type" class="form-control">
+                                    <option value="mock_entra" selected>Mock Entra</option>
+                                    <option value="microsoft_graph">Microsoft Graph</option>
+                                </select>
+                                <small class="form-text text-muted">Mock mode uses deterministic development groups and users. Microsoft Graph validates settings without requiring live credentials during tests.</small>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-3"><label class="form-control-label">Tenant</label></div>
+                            <div class="col-12 col-md-9">
+                                <input type="text" name="tenant_name" value="" class="form-control" placeholder="Tenant display name">
+                                <input type="text" name="tenant_id" value="" class="form-control m-t-10" placeholder="Tenant ID">
+                                <input type="text" name="client_id" value="" class="form-control m-t-10" placeholder="Application client ID">
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-3"><label class="form-control-label">Selected Groups</label></div>
+                            <div class="col-12 col-md-9">
+                                <input type="text" name="selected_groups" value="" class="form-control" placeholder="group-finance,group-engineering">
+                                <small class="form-text text-muted">Use group IDs from the group selection panel, separated by commas.</small>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-3"><label class="form-control-label">Microsoft Graph Permissions</label></div>
+                            <div class="col-12 col-md-9">
+                                <ul class="permission-list">
+                                    <li><code>Group.Read.All</code> for listing selected directory groups.</li>
+                                    <li><code>User.Read.All</code> for previewing group members.</li>
+                                    <li><code>Directory.Read.All</code> for tenant and manager metadata when approved.</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-3"><label class="form-control-label">Secret</label></div>
+                            <div class="col-12 col-md-9">
+                                <input type="password" name="secret" placeholder="Write-only client secret" class="form-control" autocomplete="new-password">
+                                <small class="form-text text-muted">Stored values are never rendered back; leave blank unless setting or replacing a secret.</small>
+                            </div>
+                        </div>
+                        <div class="row form-group">
+                            <div class="col col-md-3"><label class="form-control-label">Enabled</label></div>
+                            <div class="col-12 col-md-9">
+                                <label class="switch switch-text switch-info switch-pill">
+                                    <input type="checkbox" name="enabled" class="switch-input" checked>
+                                    <span data-on="On" data-off="Off" class="switch-label"></span>
+                                    <span class="switch-handle"></span>
+                                </label>
+                                <input type="hidden" name="consent_status" value="not_configured">
+                            </div>
+                        </div>
+                        <div class="directory-actions" style="text-align: right;">
+                            <button type="submit" class="btn btn-primary btn-sm">
+                                <i class="fas fa-save"></i>&nbsp; Save Provider
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
                 {% if not providers %}
                 <div class="alert alert-secondary" role="alert">
-                    No directory providers have been configured yet. Use <code>/api/integrations/directory/providers</code> to create a mock Entra or Microsoft Graph provider.
+                    No directory providers have been configured yet. Save a mock Entra provider to load groups, preview users, and import approved targets.
                 </div>
                 {% endif %}
 
                 {% for provider in providers %}
-                <form action="/api/integrations/directory/providers" method="POST" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 20px;">
-                    <input type="hidden" name="provider_id" value="{{ provider.id }}">
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Provider</label></div>
-                        <div class="col-12 col-md-9">
-                            <input type="text" name="name" value="{{ provider.name }}" class="form-control">
-                            <small class="form-text text-muted">{{ provider.provider_type }} / consent {{ provider.consent_status }}</small>
+                <div class="directory-section" id="provider-{{ provider.id }}">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h4 class="title-5 m-b-20">{{ provider.name }}</h4>
+                            <p>
+                                <span class="badge badge-secondary">{{ provider.provider_type }}</span>
+                                <span class="badge badge-info">consent {{ provider.consent_status }}</span>
+                                <span class="badge badge-{{ 'success' if provider.enabled else 'warning' }}">{{ 'enabled' if provider.enabled else 'disabled' }}</span>
+                            </p>
                         </div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Provider Type</label></div>
-                        <div class="col-12 col-md-9">
-                            <select name="provider_type" class="form-control">
-                                <option value="mock_entra" {% if provider.provider_type == "mock_entra" %}selected{% endif %}>Mock Entra</option>
-                                <option value="microsoft_graph" {% if provider.provider_type == "microsoft_graph" %}selected{% endif %}>Microsoft Graph</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Tenant</label></div>
-                        <div class="col-12 col-md-9">
-                            <input type="text" name="tenant_name" value="{{ provider.tenant_name or '' }}" class="form-control" placeholder="Tenant display name">
-                            <input type="text" name="tenant_id" value="{{ provider.tenant_id or '' }}" class="form-control m-t-10" placeholder="Tenant ID">
-                        </div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Selected Groups</label></div>
-                        <div class="col-12 col-md-9">
-                            <input type="text" name="selected_groups" value="{{ provider.selected_groups|join(',') }}" class="form-control">
-                            <small class="form-text text-muted">Comma-separated group IDs used by preview and sync routes.</small>
-                        </div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Secret</label></div>
-                        <div class="col-12 col-md-9">
-                            <input type="password" name="secret" placeholder="{{ 'Configured - enter a new value to replace' if provider.secret_configured else 'Not configured' }}" class="form-control" autocomplete="new-password">
-                            <small class="form-text text-muted">
-                                Secret placeholder: {{ "configured" if provider.secret_configured else "not configured" }}. Existing values are write-only.
+                        <div class="col-md-4" style="text-align: right;">
+                            <small>
+                                Last status: {{ provider.last_sync_status or "not synced" }}
+                                {% if provider.last_sync_at %}<br>{{ provider.last_sync_at }}{% endif %}
                             </small>
                         </div>
                     </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Sync Status</label></div>
-                        <div class="col-12 col-md-9">
-                            <p class="form-control-static">
-                                Last status: {{ provider.last_sync_status or "not synced" }}
-                                {% if provider.last_sync_at %} at {{ provider.last_sync_at }}{% endif %}
-                            </p>
-                            {% if provider.last_error_message %}
-                            <div class="alert alert-warning" role="alert">{{ provider.last_error_message }}</div>
-                            {% endif %}
+
+                    {% if provider.last_error_message %}
+                    <div class="alert alert-warning" role="alert">{{ provider.last_error_message }}</div>
+                    {% endif %}
+
+                    <form class="form-horizontal directory-provider-form" data-provider-id="{{ provider.id }}">
+                        <input type="hidden" name="provider_id" value="{{ provider.id }}">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="row form-group">
+                                    <div class="col col-md-4"><label class="form-control-label">Provider Name</label></div>
+                                    <div class="col-12 col-md-8">
+                                        <input type="text" name="name" value="{{ provider.name }}" class="form-control" required>
+                                    </div>
+                                </div>
+                                <div class="row form-group">
+                                    <div class="col col-md-4"><label class="form-control-label">Mode</label></div>
+                                    <div class="col-12 col-md-8">
+                                        <select name="provider_type" class="form-control">
+                                            <option value="mock_entra" {% if provider.provider_type == "mock_entra" %}selected{% endif %}>Mock Entra</option>
+                                            <option value="microsoft_graph" {% if provider.provider_type == "microsoft_graph" %}selected{% endif %}>Microsoft Graph</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="row form-group">
+                                    <div class="col col-md-4"><label class="form-control-label">Tenant</label></div>
+                                    <div class="col-12 col-md-8">
+                                        <input type="text" name="tenant_name" value="{{ provider.tenant_name or '' }}" class="form-control" placeholder="Tenant display name">
+                                        <input type="text" name="tenant_id" value="{{ provider.tenant_id or '' }}" class="form-control m-t-10" placeholder="Tenant ID">
+                                        <input type="text" name="client_id" value="{{ provider.client_id or '' }}" class="form-control m-t-10" placeholder="Application client ID">
+                                    </div>
+                                </div>
+                                <div class="row form-group">
+                                    <div class="col col-md-4"><label class="form-control-label">Secret</label></div>
+                                    <div class="col-12 col-md-8">
+                                        <input type="password" name="secret" placeholder="{{ 'Configured - enter a new value to replace' if provider.secret_configured else 'Not configured' }}" class="form-control" autocomplete="new-password">
+                                        <small class="form-text text-muted">Secret placeholder: {{ "configured" if provider.secret_configured else "not configured" }}.</small>
+                                    </div>
+                                </div>
+                                <div class="row form-group">
+                                    <div class="col col-md-4"><label class="form-control-label">Selected Groups</label></div>
+                                    <div class="col-12 col-md-8">
+                                        <input type="text" name="selected_groups" value="{{ provider.selected_groups|join(',') }}" class="form-control selected-groups-input">
+                                    </div>
+                                </div>
+                                <div class="row form-group">
+                                    <div class="col col-md-4"><label class="form-control-label">Enabled</label></div>
+                                    <div class="col-12 col-md-8">
+                                        <label class="switch switch-text switch-info switch-pill">
+                                            <input type="checkbox" name="enabled" class="switch-input" {% if provider.enabled %}checked{% endif %}>
+                                            <span data-on="On" data-off="Off" class="switch-label"></span>
+                                            <span class="switch-handle"></span>
+                                        </label>
+                                        <input type="hidden" name="consent_status" value="{{ provider.consent_status }}">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h5>Group Selection</h5>
+                                <div class="group-list" data-group-list="{{ provider.id }}">
+                                    <div class="alert alert-light" role="alert">Load groups to choose directory members for preview and import.</div>
+                                </div>
+                                <h5 class="m-t-20">Import Confirmation</h5>
+                                <select class="form-control campaign-select" data-provider-id="{{ provider.id }}">
+                                    <option value="">Default campaign</option>
+                                    {% for campaign in campaigns %}
+                                    <option value="{{ campaign.id }}">{{ campaign.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <small class="form-text text-muted">Preview stages users only. Import adds active, valid users to the selected campaign and skips duplicates.</small>
+                                <h5 class="m-t-20">Microsoft Graph Permission Guidance</h5>
+                                <ul class="permission-list">
+                                    <li><code>Group.Read.All</code></li>
+                                    <li><code>User.Read.All</code></li>
+                                    <li><code>Directory.Read.All</code></li>
+                                </ul>
+                            </div>
                         </div>
-                    </div>
-                    <div class="row form-group">
-                        <div class="col col-md-3"><label class="form-control-label">Enabled</label></div>
-                        <div class="col-12 col-md-9">
-                            <label class="switch switch-text switch-info switch-pill">
-                                <input type="checkbox" name="enabled" class="switch-input" {% if provider.enabled %}checked{% endif %}>
-                                <span data-on="On" data-off="Off" class="switch-label"></span>
-                                <span class="switch-handle"></span>
-                            </label>
+                        <div class="directory-actions" style="text-align: right;">
+                            <button type="submit" class="btn btn-primary btn-sm">
+                                <i class="fas fa-save"></i>&nbsp; Save
+                            </button>
+                            <button type="button" class="btn btn-info btn-sm" data-action="test" data-provider-id="{{ provider.id }}">
+                                <i class="fas fa-vial"></i>&nbsp; Test
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" data-action="groups" data-provider-id="{{ provider.id }}">
+                                <i class="fas fa-users"></i>&nbsp; Load Groups
+                            </button>
+                            <button type="button" class="btn btn-warning btn-sm" data-action="preview" data-provider-id="{{ provider.id }}">
+                                <i class="fas fa-search"></i>&nbsp; Sync Preview
+                            </button>
+                            <button type="button" class="btn btn-success btn-sm" data-action="sync" data-provider-id="{{ provider.id }}">
+                                <i class="fas fa-file-import"></i>&nbsp; Confirm Import
+                            </button>
                         </div>
-                    </div>
-                    <div class="card-footer" style="text-align: right; margin-left: -20px; margin-right: -20px; margin-bottom: -20px;">
-                        <button type="submit" class="btn btn-primary btn-sm">
-                            <i class="fa fa-dot-circle-o"></i> Save Directory Provider
-                        </button>
-                    </div>
-                </form>
+                    </form>
+                    <div class="directory-output m-t-20" data-output="{{ provider.id }}">Ready.</div>
+                </div>
                 {% endfor %}
+
+                <div class="directory-section">
+                    <h4 class="title-5 m-b-20">Sync History</h4>
+                    <div class="table-responsive table-responsive-data2">
+                        <table class="table table-data2">
+                            <thead>
+                                <tr>
+                                    <th>Job</th>
+                                    <th>Provider</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Users</th>
+                                    <th>Imported</th>
+                                    <th>Skipped</th>
+                                    <th>Completed</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for job in sync_jobs %}
+                                <tr>
+                                    <td><a href="/integrations/directory/sync-jobs/{{ job.id }}">#{{ job.id }}</a></td>
+                                    <td>{{ job.provider_name }}</td>
+                                    <td>{{ job.job_type }}</td>
+                                    <td><span class="badge badge-secondary">{{ job.status }}</span></td>
+                                    <td>{{ job.total_users }}</td>
+                                    <td>{{ job.imported_count }}</td>
+                                    <td>{{ job.skipped_count }}</td>
+                                    <td>{{ job.completed_at or job.updated_at }}</td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="8">No directory sync jobs have run yet.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
     <script src="/vendor/jquery-3.2.1.min.js"></script>
     <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
     <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+    <script>
+        function formPayload(form) {
+            var payload = {};
+            $(form).serializeArray().forEach(function(item) {
+                if (item.name === "secret" && !item.value) {
+                    return;
+                }
+                payload[item.name] = item.value;
+            });
+            payload.enabled = $(form).find("input[name='enabled']").is(":checked");
+            return payload;
+        }
+
+        function selectedGroups(providerId) {
+            var form = $(".directory-provider-form[data-provider-id='" + providerId + "']");
+            var checked = form.find("input[name='group_choice']:checked").map(function() {
+                return this.value;
+            }).get();
+            if (checked.length) {
+                return checked;
+            }
+            var raw = form.find("input[name='selected_groups']").val() || "";
+            return raw.split(",").map(function(value) { return value.trim(); }).filter(Boolean);
+        }
+
+        function setOutput(providerId, message) {
+            $("[data-output='" + providerId + "']").text(message);
+        }
+
+        function apiError(xhr) {
+            var payload = xhr.responseJSON || {};
+            if (payload.error && payload.error.message) {
+                return payload.error.message;
+            }
+            return xhr.statusText || "Request failed";
+        }
+
+        $(".directory-provider-form").on("submit", function(event) {
+            event.preventDefault();
+            var form = this;
+            var providerId = $(form).data("provider-id");
+            $.ajax({
+                url: "/api/integrations/directory/providers",
+                method: "POST",
+                contentType: "application/json",
+                data: JSON.stringify(formPayload(form))
+            }).done(function(response) {
+                if (providerId) {
+                    setOutput(providerId, "Saved provider " + response.provider.name + ".");
+                } else {
+                    window.location = "/integrations/directory";
+                }
+            }).fail(function(xhr) {
+                if (providerId) {
+                    setOutput(providerId, apiError(xhr));
+                } else {
+                    alert(apiError(xhr));
+                }
+            });
+        });
+
+        $("[data-action='test']").on("click", function() {
+            var providerId = $(this).data("provider-id");
+            $.ajax({
+                url: "/api/integrations/directory/providers/" + providerId + "/test",
+                method: "POST",
+                contentType: "application/json",
+                data: "{}"
+            }).done(function(response) {
+                setOutput(providerId, response.test.message + " Groups available: " + response.test.group_count + ".");
+            }).fail(function(xhr) {
+                setOutput(providerId, apiError(xhr));
+            });
+        });
+
+        $("[data-action='groups']").on("click", function() {
+            var providerId = $(this).data("provider-id");
+            $.getJSON("/api/integrations/directory/providers/" + providerId + "/groups")
+                .done(function(response) {
+                    var selected = selectedGroups(providerId);
+                    var items = response.groups.map(function(group) {
+                        var checked = selected.indexOf(group.external_group_id) !== -1 ? " checked" : "";
+                        return "<label class='d-block'><input type='checkbox' name='group_choice' value='" + group.external_group_id + "'" + checked + "> <strong>" + group.display_name + "</strong> <small>(" + group.external_group_id + ", " + group.member_count + " members)</small></label>";
+                    }).join("");
+                    $("[data-group-list='" + providerId + "']").html(items || "<div class='alert alert-light'>No groups returned.</div>");
+                    setOutput(providerId, "Loaded " + response.groups.length + " groups.");
+                })
+                .fail(function(xhr) {
+                    setOutput(providerId, apiError(xhr));
+                });
+        });
+
+        $("[data-action='preview'], [data-action='sync']").on("click", function() {
+            var providerId = $(this).data("provider-id");
+            var action = $(this).data("action");
+            var campaignId = $(".campaign-select[data-provider-id='" + providerId + "']").val();
+            var payload = { group_ids: selectedGroups(providerId) };
+            if (action === "sync" && campaignId) {
+                payload.campaign_id = campaignId;
+            }
+            $.ajax({
+                url: "/api/integrations/directory/providers/" + providerId + "/" + action,
+                method: "POST",
+                contentType: "application/json",
+                data: JSON.stringify(payload)
+            }).done(function(response) {
+                var job = response.sync_job.job;
+                var label = action === "sync" ? "Import" : "Preview";
+                setOutput(providerId, label + " job #" + job.id + " completed. Staged: " + job.staged_count + ", imported: " + job.imported_count + ", skipped: " + job.skipped_count + ". Review: /integrations/directory/sync-jobs/" + job.id);
+            }).fail(function(xhr) {
+                setOutput(providerId, apiError(xhr));
+            });
+        });
+    </script>
 </body>
 </html>
