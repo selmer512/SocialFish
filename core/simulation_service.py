@@ -628,14 +628,44 @@ def get_campaign_detail(conn, campaign_id, include_archived_targets=True):
     campaign = get_campaign(conn, campaign_id)
     if not campaign:
         raise ValueError("Unknown simulation campaign id: {}".format(campaign_id))
+    targets = list_targets(conn, campaign_id, include_archived=include_archived_targets)
+    _attach_latest_target_events(conn, targets)
     return {
         "campaign": campaign,
-        "targets": list_targets(conn, campaign_id, include_archived=include_archived_targets),
+        "targets": targets,
         "metrics": get_campaign_metrics(conn, campaign_id),
         "import_batches": list_import_batches(conn, campaign_id),
         "events": list_simulation_events(conn, campaign_id),
         "ai_drafts": list_ai_campaign_drafts(conn, campaign_id),
+        "delivery_providers": list_delivery_provider_settings(conn),
+        "delivery_preview": build_delivery_preview(conn, campaign_id, mode="dry_run"),
+        "delivery_jobs": list_delivery_jobs(conn, campaign_id=campaign_id),
     }
+
+
+def _attach_latest_target_events(conn, targets):
+    if not targets:
+        return
+    target_ids = [target["id"] for target in targets]
+    placeholders = ",".join("?" for _ in target_ids)
+    events = _rows_to_dicts(
+        conn.execute(
+            f"""
+            SELECT e.*
+            FROM simulation_events e
+            JOIN (
+                SELECT target_id, MAX(id) AS latest_event_id
+                FROM simulation_events
+                WHERE target_id IN ({placeholders})
+                GROUP BY target_id
+            ) latest ON latest.latest_event_id = e.id
+            """,
+            target_ids,
+        )
+    )
+    latest_by_target = {event["target_id"]: event for event in events}
+    for target in targets:
+        target["latest_event"] = latest_by_target.get(target["id"])
 
 
 def list_simulation_events(conn, campaign_id=None):
@@ -1650,6 +1680,28 @@ def record_tracking_token_event(conn, token_value, token_type=None, metadata=Non
 def get_delivery_job(conn, job_id):
     row = _row_to_dict(conn.execute("SELECT * FROM simulation_delivery_jobs WHERE id = ?", (job_id,)))
     return _delivery_job_response(row)
+
+
+def list_delivery_jobs(conn, campaign_id=None, limit=5):
+    params = []
+    where = ""
+    if campaign_id is not None:
+        where = "WHERE campaign_id = ?"
+        params.append(campaign_id)
+    params.append(int(limit or 5))
+    rows = _rows_to_dicts(
+        conn.execute(
+            f"""
+            SELECT *
+            FROM simulation_delivery_jobs
+            {where}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            params,
+        )
+    )
+    return [_delivery_job_response(row) for row in rows]
 
 
 def list_delivery_attempts(conn, job_id):

@@ -74,11 +74,16 @@ This phase adds simulation delivery orchestration and event tracking for email, 
   - Added service helpers that resolve tracking tokens, increment token counters, record simulation events, and preserve target rollups.
   - Verified with focused tracking tests and `python -m unittest discover tests`.
 
-- [ ] Build delivery UI surfaces:
+- [x] Build delivery UI surfaces:
   - Add delivery preview, start, and status panels on campaign detail pages
   - Show dry-run status clearly so operators know no external messages were sent
   - Show per-target per-channel delivery status and latest event
   - Provide provider setting links back to AI Settings or a provider settings page as appropriate
+
+  Completed 2026-09-23:
+  - Added campaign detail delivery preview, dry-run start controls, recent status links, and per-target latest-event display.
+  - Added delivery provider configuration forms to AI Settings with dry-run/readiness guidance and write-only secret handling.
+  - Verified with `python -m unittest tests.test_simulation_routes` and `python -m unittest discover tests`.
 
 - [ ] Add structured feature documentation while implementing delivery:
   - Create `docs/features/simulation-delivery-tracking.md` with YAML front matter using type `reference`, tags for `delivery`, `metrics`, and `simulations`

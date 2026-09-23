@@ -24,6 +24,11 @@
                     <strong>Authorized internal training simulations only.</strong>
                     Configure model providers for approved awareness content. Secrets are accepted by the API but are never rendered back in pages or JSON responses.
                 </div>
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }}" role="alert">{{ message }}</div>
+                {% endfor %}
+                {% endwith %}
 
                 <div class="row">
                     <div class="col-md-8">
@@ -115,6 +120,81 @@
                     <div class="card-footer" style="text-align: right; margin-left: -20px; margin-right: -20px; margin-bottom: -20px;">
                         <button type="submit" class="btn btn-primary btn-sm">
                             <i class="fa fa-dot-circle-o"></i> Save Provider
+                        </button>
+                    </div>
+                </form>
+                {% endfor %}
+
+                <hr id="delivery-providers">
+                <div class="row">
+                    <div class="col-md-8">
+                        <h3 class="title-5 m-b-35">Delivery Provider Configuration</h3>
+                    </div>
+                    <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-outline-secondary btn-sm" href="/simulations/campaigns">
+                            <i class="fas fa-bullhorn"></i>&nbsp; Campaigns
+                        </a>
+                    </div>
+                </div>
+                <div class="alert alert-secondary" role="alert">
+                    Dry-run delivery providers are safe placeholders and do not send external traffic. Real provider shells remain blocked until enabled here and supplied with their required settings.
+                </div>
+
+                {% for provider in delivery_providers %}
+                <form action="/api/delivery-settings" method="POST" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 20px;">
+                    <input type="hidden" name="provider_id" value="{{ provider.id }}">
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Provider</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="text" name="provider_name" value="{{ provider.provider_name }}" class="form-control">
+                            <small class="form-text text-muted">
+                                {{ provider.channel|upper }} / {{ provider.provider_type }} / {{ provider.provider_key }}
+                            </small>
+                        </div>
+                    </div>
+                    {% for setting_name in provider.required_settings %}
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">{{ setting_name }}</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="text" name="setting_{{ setting_name }}" value="{{ provider.settings.get(setting_name, '') }}" class="form-control">
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Settings</label></div>
+                        <div class="col-12 col-md-9">
+                            <small class="form-text text-muted">No required settings for this provider.</small>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Secret</label></div>
+                        <div class="col-12 col-md-9">
+                            <input type="password" name="secret" placeholder="{{ 'Configured - enter a new value to replace' if provider.secret_configured else 'Not configured' }}" class="form-control" autocomplete="new-password">
+                            <small class="form-text text-muted">
+                                Secret placeholder: {{ "configured" if provider.secret_configured else "not configured" }}. Existing secret values are write-only and never displayed.
+                            </small>
+                        </div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Enabled</label></div>
+                        <div class="col-12 col-md-9">
+                            <label class="switch switch-text switch-info switch-pill">
+                                <input type="checkbox" name="enabled" class="switch-input" {% if provider.enabled %}checked{% endif %}>
+                                <span data-on="On" data-off="Off" class="switch-label"></span>
+                                <span class="switch-handle"></span>
+                            </label>
+                            <small class="form-text text-muted">
+                                Real provider execution still performs readiness checks before any send attempt.
+                            </small>
+                        </div>
+                    </div>
+                    {% if provider.last_error_message %}
+                    <div class="alert alert-warning" role="alert">{{ provider.last_error_message }}</div>
+                    {% endif %}
+                    <div class="card-footer" style="text-align: right; margin-left: -20px; margin-right: -20px; margin-bottom: -20px;">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="fa fa-dot-circle-o"></i> Save Delivery Provider
                         </button>
                     </div>
                 </form>

@@ -31,6 +31,7 @@ from core.simulation_service import (
     import_targets_csv,
     list_ai_provider_settings,
     list_campaigns,
+    list_delivery_provider_settings,
     list_targets,
     record_provider_webhook_event,
     record_simulation_event,
@@ -39,6 +40,7 @@ from core.simulation_service import (
     save_ai_campaign_draft,
     update_campaign,
     update_ai_provider_settings,
+    update_delivery_provider_settings,
     update_target,
 )
 from core.ai_generation import (
@@ -319,6 +321,17 @@ def _delivery_payload():
         "provider_ids": _delivery_provider_ids(data),
         "max_retries": int(data.get("max_retries") or 0),
     }
+
+
+def _delivery_settings_payload(data):
+    settings = {}
+    for key, value in data.items():
+        if not key.startswith("setting_"):
+            continue
+        setting_name = key.split("setting_", 1)[1]
+        if setting_name:
+            settings[setting_name] = value
+    return settings
 
 # Conta o numero de credenciais salvas no banco
 def countCreds():
@@ -604,6 +617,9 @@ def simulation_campaign_detail(campaign_id):
         metrics=detail["metrics"],
         import_batches=detail["import_batches"],
         ai_drafts=detail["ai_drafts"],
+        delivery_preview=detail["delivery_preview"],
+        delivery_jobs=detail["delivery_jobs"],
+        delivery_providers=detail["delivery_providers"],
         statuses=("draft", "active", "paused", "completed"),
         channels=("email", "sms", "voice"),
         target_csv_required_columns=TARGET_CSV_REQUIRED_COLUMNS,
@@ -933,7 +949,12 @@ def ai_save_draft_api():
 @flask_login.login_required
 def ai_settings():
     providers = list_ai_provider_settings(g.db)
-    return render_template('admin/ai_settings.html', providers=providers)
+    delivery_providers = list_delivery_provider_settings(g.db)
+    return render_template(
+        'admin/ai_settings.html',
+        providers=providers,
+        delivery_providers=delivery_providers,
+    )
 
 
 @app.route("/api/ai-settings", methods=['POST'])
@@ -955,6 +976,30 @@ def ai_settings_api():
         return jsonify({'status': 'ok', 'provider': provider})
     except (TypeError, ValueError) as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
+
+
+@app.route("/api/delivery-settings", methods=['POST'])
+@flask_login.login_required
+def delivery_settings_api():
+    data = _request_data()
+    try:
+        provider = update_delivery_provider_settings(
+            g.db,
+            _optional_int(data.get('provider_id') or data.get('id')),
+            provider_name=data.get('provider_name') or data.get('name'),
+            enabled=_form_bool(data.get('enabled')),
+            settings=_delivery_settings_payload(data),
+            secret=data.get('secret') or data.get('api_key'),
+        )
+        if request.is_json:
+            return jsonify({'status': 'ok', 'provider': provider})
+        flash("Delivery provider {} updated.".format(provider["provider_name"]), "success")
+        return redirect("/ai-settings#delivery-providers")
+    except (TypeError, ValueError) as e:
+        if request.is_json:
+            return jsonify({'status': 'error', 'message': str(e)}), 400
+        flash(str(e), "danger")
+        return redirect("/ai-settings#delivery-providers")
 
 # pagina para envio de emails
 @app.route("/mail", methods=['GET', 'POST'])

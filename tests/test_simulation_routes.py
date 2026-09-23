@@ -103,6 +103,10 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Base URL", ai_settings.data)
         self.assertIn(b"Secret placeholder", ai_settings.data)
         self.assertIn(b"Save Provider", ai_settings.data)
+        self.assertIn(b"Delivery Provider Configuration", ai_settings.data)
+        self.assertIn(b"Dry-run Email", ai_settings.data)
+        self.assertIn(b"Save Delivery Provider", ai_settings.data)
+        self.assertIn(b"/api/delivery-settings", ai_settings.data)
         self.assertEqual(ai_builder.status_code, 200)
         self.assertIn(b"AI Scenario Builder", ai_builder.data)
         self.assertIn(b"Authorized internal training simulations only", ai_builder.data)
@@ -380,6 +384,12 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Delivery Attempts", page_response.data)
         self.assertIn(b"Tracking Tokens", page_response.data)
 
+        detail_response = self.client.get("/simulations/campaigns/{}".format(campaign_id))
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertIn("Delivery #{}".format(job_id).encode("utf-8"), detail_response.data)
+        self.assertIn(b"delivered", detail_response.data)
+        self.assertIn(b"Latest Event", detail_response.data)
+
     def test_delivery_routes_return_structured_errors(self):
         missing_status = self.client.get("/api/simulations/deliveries/999999")
         missing_payload = missing_status.get_json()
@@ -531,6 +541,38 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertNotIn("secret_placeholder", payload["provider"])
         self.assertNotIn("super-secret-route-test", str(payload))
 
+    def test_delivery_settings_api_updates_provider_without_echoing_secret(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            provider_id = conn.execute(
+                "SELECT id FROM simulation_channel_providers WHERE provider_key = 'smtp_email'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        response = self.client.post(
+            "/api/delivery-settings",
+            json={
+                "provider_id": provider_id,
+                "provider_name": "Route SMTP Provider",
+                "enabled": True,
+                "setting_smtp_host": "smtp.example.test",
+                "setting_smtp_port": "587",
+                "setting_from_email": "training@example.test",
+                "secret": "delivery-secret-route-test",
+            },
+        )
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["provider"]["provider_name"], "Route SMTP Provider")
+        self.assertTrue(payload["provider"]["enabled"])
+        self.assertEqual(payload["provider"]["settings"]["smtp_host"], "smtp.example.test")
+        self.assertTrue(payload["provider"]["secret_configured"])
+        self.assertNotIn("secret_placeholder", payload["provider"])
+        self.assertNotIn("delivery-secret-route-test", str(payload))
+
     def test_campaign_management_routes_create_update_detail_and_archive(self):
         create_response = self.client.post(
             "/simulations/campaigns",
@@ -578,6 +620,12 @@ class SimulationRoutesTest(unittest.TestCase):
 
         detail_response = self.client.get("/simulations/campaigns/{}".format(campaign_id))
         self.assertEqual(detail_response.status_code, 200)
+        self.assertIn(b"Delivery", detail_response.data)
+        self.assertIn(b"Dry-run mode is selected by default.", detail_response.data)
+        self.assertIn(b"Start Dry-run Delivery", detail_response.data)
+        self.assertIn(b"Recent Delivery Jobs", detail_response.data)
+        self.assertIn(b"Provider Settings", detail_response.data)
+        self.assertIn(b"/ai-settings#delivery-providers", detail_response.data)
         self.assertIn(b"Edit Campaign", detail_response.data)
         self.assertIn(b"Add Targets", detail_response.data)
         self.assertIn(b"Manual Target Entry", detail_response.data)
