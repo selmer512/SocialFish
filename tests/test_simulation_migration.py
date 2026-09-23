@@ -29,6 +29,11 @@ class SimulationMigrationTest(unittest.TestCase):
                 "simulation_tracking_tokens",
                 "ai_provider_configs",
                 "ai_generation_audits",
+                "directory_providers",
+                "directory_sync_jobs",
+                "staged_directory_users",
+                "directory_group_mappings",
+                "directory_sync_audit_events",
             }
             tables = {
                 row[0]
@@ -192,6 +197,238 @@ class SimulationMigrationTest(unittest.TestCase):
                 }.issubset(event_columns)
             )
 
+            conn.close()
+
+    def test_directory_integration_schema_tracks_providers_jobs_users_groups_and_audit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "socialfish-test.db")
+
+            migrate_db(db_path)
+            migrate_db(db_path)
+
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+
+            provider_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(directory_providers)")
+            }
+            self.assertTrue(
+                {
+                    "name",
+                    "provider_type",
+                    "tenant_id",
+                    "tenant_name",
+                    "authority_url",
+                    "client_id",
+                    "enabled",
+                    "consent_status",
+                    "consented_scopes_json",
+                    "selected_groups_json",
+                    "field_mapping_json",
+                    "settings_json",
+                    "secret_reference",
+                    "secret_placeholder",
+                    "last_sync_status",
+                    "last_sync_job_id",
+                    "last_sync_at",
+                    "last_error_message",
+                }.issubset(provider_columns)
+            )
+            self.assertFalse(
+                {
+                    "access_token",
+                    "refresh_token",
+                    "client_secret",
+                    "oauth_token",
+                }.intersection(provider_columns)
+            )
+
+            sync_job_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(directory_sync_jobs)")
+            }
+            self.assertTrue(
+                {
+                    "provider_id",
+                    "job_type",
+                    "status",
+                    "selected_groups_json",
+                    "total_groups",
+                    "total_users",
+                    "staged_count",
+                    "imported_count",
+                    "skipped_count",
+                    "invalid_count",
+                    "duplicate_count",
+                    "validation_errors_json",
+                    "requested_by",
+                    "started_at",
+                    "completed_at",
+                }.issubset(sync_job_columns)
+            )
+
+            staged_user_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(staged_directory_users)")
+            }
+            self.assertTrue(
+                {
+                    "provider_id",
+                    "sync_job_id",
+                    "external_user_id",
+                    "user_principal_name",
+                    "mail",
+                    "display_name",
+                    "given_name",
+                    "surname",
+                    "job_title",
+                    "department",
+                    "office_location",
+                    "mobile_phone",
+                    "business_phones_json",
+                    "manager",
+                    "groups_json",
+                    "source_group_ids_json",
+                    "active",
+                    "validation_status",
+                    "validation_errors_json",
+                    "target_payload_json",
+                    "imported_target_id",
+                    "staged_at",
+                    "imported_at",
+                }.issubset(staged_user_columns)
+            )
+
+            group_mapping_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(directory_group_mappings)")
+            }
+            self.assertTrue(
+                {
+                    "provider_id",
+                    "external_group_id",
+                    "display_name",
+                    "description",
+                    "selected",
+                    "target_department",
+                    "campaign_id",
+                    "mapping_metadata_json",
+                    "last_seen_at",
+                }.issubset(group_mapping_columns)
+            )
+
+            audit_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(directory_sync_audit_events)")
+            }
+            self.assertTrue(
+                {
+                    "provider_id",
+                    "sync_job_id",
+                    "event_type",
+                    "severity",
+                    "actor",
+                    "message",
+                    "metadata_json",
+                    "created_at",
+                }.issubset(audit_columns)
+            )
+
+            cur.execute(
+                """
+                INSERT INTO directory_providers (
+                    name, provider_type, tenant_id, tenant_name, client_id,
+                    enabled, consent_status, consented_scopes_json,
+                    selected_groups_json, secret_reference, secret_placeholder
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "Mock Entra Test",
+                    "mock_entra",
+                    "tenant-123",
+                    "Example Tenant",
+                    "client-123",
+                    1,
+                    "granted",
+                    '["Group.Read.All","User.Read.All"]',
+                    '["group-finance"]',
+                    "vault://directory/mock-entra-test",
+                    "configured",
+                ),
+            )
+            provider_id = cur.lastrowid
+            cur.execute(
+                """
+                INSERT INTO directory_sync_jobs (
+                    provider_id, job_type, status, selected_groups_json,
+                    total_groups, total_users, staged_count
+                )
+                VALUES (?, 'preview', 'completed', ?, 1, 1, 1)
+                """,
+                (provider_id, '["group-finance"]'),
+            )
+            sync_job_id = cur.lastrowid
+            cur.execute(
+                """
+                INSERT INTO staged_directory_users (
+                    provider_id, sync_job_id, external_user_id,
+                    user_principal_name, mail, display_name, department,
+                    groups_json, source_group_ids_json, validation_status,
+                    target_payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    provider_id,
+                    sync_job_id,
+                    "user-123",
+                    "avery@example.test",
+                    "avery@example.test",
+                    "Avery Stone",
+                    "Finance",
+                    '["Finance"]',
+                    '["group-finance"]',
+                    "valid",
+                    '{"name":"Avery Stone","email":"avery@example.test","source":"directory"}',
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO directory_group_mappings (
+                    provider_id, external_group_id, display_name,
+                    selected, target_department
+                )
+                VALUES (?, ?, ?, 1, ?)
+                """,
+                (provider_id, "group-finance", "Finance", "Finance"),
+            )
+            cur.execute(
+                """
+                INSERT INTO directory_sync_audit_events (
+                    provider_id, sync_job_id, event_type, severity, message,
+                    metadata_json
+                )
+                VALUES (?, ?, 'preview_completed', 'info', ?, ?)
+                """,
+                (
+                    provider_id,
+                    sync_job_id,
+                    "Staged one directory user.",
+                    '{"staged_count":1}',
+                ),
+            )
+            conn.commit()
+
+            self.assertEqual(
+                cur.execute("SELECT COUNT(*) FROM staged_directory_users").fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                cur.execute("SELECT secret_reference FROM directory_providers").fetchone()[0],
+                "vault://directory/mock-entra-test",
+            )
             conn.close()
 
     def test_campaign_management_columns_are_added_to_existing_phase_01_schema(self):

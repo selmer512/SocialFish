@@ -972,6 +972,224 @@ def migrate_db(database_path):
         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     })
 
+    # ============= DIRECTORY INTEGRATION READINESS (Phase 06) =============
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS directory_providers (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            provider_type TEXT NOT NULL DEFAULT 'mock_entra',
+            tenant_id TEXT,
+            tenant_name TEXT,
+            authority_url TEXT,
+            client_id TEXT,
+            enabled BOOLEAN NOT NULL DEFAULT 0,
+            consent_status TEXT NOT NULL DEFAULT 'not_configured',
+            consented_scopes_json TEXT NOT NULL DEFAULT '[]',
+            selected_groups_json TEXT NOT NULL DEFAULT '[]',
+            field_mapping_json TEXT NOT NULL DEFAULT '{}',
+            settings_json TEXT NOT NULL DEFAULT '{}',
+            secret_reference TEXT,
+            secret_placeholder TEXT,
+            last_sync_status TEXT,
+            last_sync_job_id INTEGER,
+            last_sync_at TIMESTAMP,
+            last_error_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (last_sync_job_id) REFERENCES directory_sync_jobs(id)
+        )
+    """)
+    _ensure_columns(cur, "directory_providers", {
+        "name": "TEXT",
+        "provider_type": "TEXT NOT NULL DEFAULT 'mock_entra'",
+        "tenant_id": "TEXT",
+        "tenant_name": "TEXT",
+        "authority_url": "TEXT",
+        "client_id": "TEXT",
+        "enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "consent_status": "TEXT NOT NULL DEFAULT 'not_configured'",
+        "consented_scopes_json": "TEXT NOT NULL DEFAULT '[]'",
+        "selected_groups_json": "TEXT NOT NULL DEFAULT '[]'",
+        "field_mapping_json": "TEXT NOT NULL DEFAULT '{}'",
+        "settings_json": "TEXT NOT NULL DEFAULT '{}'",
+        "secret_reference": "TEXT",
+        "secret_placeholder": "TEXT",
+        "last_sync_status": "TEXT",
+        "last_sync_job_id": "INTEGER",
+        "last_sync_at": "TIMESTAMP",
+        "last_error_message": "TEXT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS directory_sync_jobs (
+            id INTEGER PRIMARY KEY,
+            provider_id INTEGER NOT NULL,
+            job_type TEXT NOT NULL DEFAULT 'preview',
+            status TEXT NOT NULL DEFAULT 'pending',
+            selected_groups_json TEXT NOT NULL DEFAULT '[]',
+            total_groups INTEGER NOT NULL DEFAULT 0,
+            total_users INTEGER NOT NULL DEFAULT 0,
+            staged_count INTEGER NOT NULL DEFAULT 0,
+            imported_count INTEGER NOT NULL DEFAULT 0,
+            skipped_count INTEGER NOT NULL DEFAULT 0,
+            invalid_count INTEGER NOT NULL DEFAULT 0,
+            duplicate_count INTEGER NOT NULL DEFAULT 0,
+            validation_errors_json TEXT NOT NULL DEFAULT '[]',
+            requested_by TEXT,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (provider_id) REFERENCES directory_providers(id)
+        )
+    """)
+    _ensure_columns(cur, "directory_sync_jobs", {
+        "provider_id": "INTEGER",
+        "job_type": "TEXT NOT NULL DEFAULT 'preview'",
+        "status": "TEXT NOT NULL DEFAULT 'pending'",
+        "selected_groups_json": "TEXT NOT NULL DEFAULT '[]'",
+        "total_groups": "INTEGER NOT NULL DEFAULT 0",
+        "total_users": "INTEGER NOT NULL DEFAULT 0",
+        "staged_count": "INTEGER NOT NULL DEFAULT 0",
+        "imported_count": "INTEGER NOT NULL DEFAULT 0",
+        "skipped_count": "INTEGER NOT NULL DEFAULT 0",
+        "invalid_count": "INTEGER NOT NULL DEFAULT 0",
+        "duplicate_count": "INTEGER NOT NULL DEFAULT 0",
+        "validation_errors_json": "TEXT NOT NULL DEFAULT '[]'",
+        "requested_by": "TEXT",
+        "started_at": "TIMESTAMP",
+        "completed_at": "TIMESTAMP",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS staged_directory_users (
+            id INTEGER PRIMARY KEY,
+            provider_id INTEGER NOT NULL,
+            sync_job_id INTEGER NOT NULL,
+            external_user_id TEXT NOT NULL,
+            user_principal_name TEXT,
+            mail TEXT,
+            display_name TEXT,
+            given_name TEXT,
+            surname TEXT,
+            job_title TEXT,
+            department TEXT,
+            office_location TEXT,
+            mobile_phone TEXT,
+            business_phones_json TEXT NOT NULL DEFAULT '[]',
+            manager TEXT,
+            groups_json TEXT NOT NULL DEFAULT '[]',
+            source_group_ids_json TEXT NOT NULL DEFAULT '[]',
+            active BOOLEAN NOT NULL DEFAULT 1,
+            validation_status TEXT NOT NULL DEFAULT 'pending',
+            validation_errors_json TEXT NOT NULL DEFAULT '[]',
+            target_payload_json TEXT NOT NULL DEFAULT '{}',
+            imported_target_id INTEGER,
+            staged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            imported_at TIMESTAMP,
+            FOREIGN KEY (provider_id) REFERENCES directory_providers(id),
+            FOREIGN KEY (sync_job_id) REFERENCES directory_sync_jobs(id),
+            FOREIGN KEY (imported_target_id) REFERENCES simulation_targets(id),
+            UNIQUE(provider_id, external_user_id)
+        )
+    """)
+    _ensure_columns(cur, "staged_directory_users", {
+        "provider_id": "INTEGER",
+        "sync_job_id": "INTEGER",
+        "external_user_id": "TEXT",
+        "user_principal_name": "TEXT",
+        "mail": "TEXT",
+        "display_name": "TEXT",
+        "given_name": "TEXT",
+        "surname": "TEXT",
+        "job_title": "TEXT",
+        "department": "TEXT",
+        "office_location": "TEXT",
+        "mobile_phone": "TEXT",
+        "business_phones_json": "TEXT NOT NULL DEFAULT '[]'",
+        "manager": "TEXT",
+        "groups_json": "TEXT NOT NULL DEFAULT '[]'",
+        "source_group_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+        "active": "BOOLEAN NOT NULL DEFAULT 1",
+        "validation_status": "TEXT NOT NULL DEFAULT 'pending'",
+        "validation_errors_json": "TEXT NOT NULL DEFAULT '[]'",
+        "target_payload_json": "TEXT NOT NULL DEFAULT '{}'",
+        "imported_target_id": "INTEGER",
+        "staged_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "imported_at": "TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS directory_group_mappings (
+            id INTEGER PRIMARY KEY,
+            provider_id INTEGER NOT NULL,
+            external_group_id TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            description TEXT,
+            selected BOOLEAN NOT NULL DEFAULT 0,
+            target_department TEXT,
+            campaign_id INTEGER,
+            mapping_metadata_json TEXT NOT NULL DEFAULT '{}',
+            last_seen_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (provider_id) REFERENCES directory_providers(id),
+            FOREIGN KEY (campaign_id) REFERENCES simulation_campaigns(id),
+            UNIQUE(provider_id, external_group_id)
+        )
+    """)
+    _ensure_columns(cur, "directory_group_mappings", {
+        "provider_id": "INTEGER",
+        "external_group_id": "TEXT",
+        "display_name": "TEXT",
+        "description": "TEXT",
+        "selected": "BOOLEAN NOT NULL DEFAULT 0",
+        "target_department": "TEXT",
+        "campaign_id": "INTEGER",
+        "mapping_metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+        "last_seen_at": "TIMESTAMP",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS directory_sync_audit_events (
+            id INTEGER PRIMARY KEY,
+            provider_id INTEGER,
+            sync_job_id INTEGER,
+            event_type TEXT NOT NULL,
+            severity TEXT NOT NULL DEFAULT 'info',
+            actor TEXT,
+            message TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (provider_id) REFERENCES directory_providers(id),
+            FOREIGN KEY (sync_job_id) REFERENCES directory_sync_jobs(id)
+        )
+    """)
+    _ensure_columns(cur, "directory_sync_audit_events", {
+        "provider_id": "INTEGER",
+        "sync_job_id": "INTEGER",
+        "event_type": "TEXT",
+        "severity": "TEXT NOT NULL DEFAULT 'info'",
+        "actor": "TEXT",
+        "message": "TEXT",
+        "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_directory_providers_type ON directory_providers(provider_type, enabled)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_directory_sync_jobs_provider ON directory_sync_jobs(provider_id, status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_staged_directory_users_job ON staged_directory_users(sync_job_id, validation_status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_staged_directory_users_contact ON staged_directory_users(mail, user_principal_name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_directory_group_mappings_provider ON directory_group_mappings(provider_id, selected)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_directory_sync_audit_events_job ON directory_sync_audit_events(sync_job_id, event_type)")
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS ai_campaign_drafts (
             id INTEGER PRIMARY KEY,
