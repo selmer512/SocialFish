@@ -8,6 +8,7 @@ from core.directory_connectors import (
     DirectoryDisabledProviderError,
     DirectoryProviderConfig,
     DirectoryProviderConfigurationError,
+    DirectoryUser,
     MicrosoftGraphDirectoryConnector,
     MockEntraDirectoryConnector,
     connector_for_provider_settings,
@@ -17,7 +18,9 @@ from core.simulation_service import (
     list_directory_groups,
     list_directory_provider_settings,
     map_directory_user_to_target,
+    preview_directory_sync,
     preview_directory_users,
+    sync_directory_users,
     sync_directory_staged_users,
     update_directory_provider_settings,
 )
@@ -155,6 +158,45 @@ class DirectoryConnectorTest(unittest.TestCase):
         self.assertEqual(request["scopes"], ["Group.Read.All", "User.Read.All"])
         with self.assertRaisesRegex(DirectoryProviderConfigurationError, "credential retrieval"):
             list_directory_groups(self.conn, provider["id"])
+
+    def test_directory_sync_validation_marks_invalid_staged_users_and_skips_import(self):
+        provider = create_directory_provider_settings(
+            self.conn,
+            "Validation Mock Entra",
+            provider_type="mock_entra",
+            enabled=True,
+            selected_groups=["group-invalid"],
+        )
+        invalid_user = DirectoryUser(
+            external_user_id="",
+            user_principal_name="",
+            mail="",
+            display_name="",
+            source_group_ids=("group-invalid",),
+        )
+        original_users = MockEntraDirectoryConnector._users
+        MockEntraDirectoryConnector._users = original_users + (invalid_user,)
+        try:
+            preview = preview_directory_sync(self.conn, provider["id"], group_ids=["group-invalid"])
+            sync_result = sync_directory_users(self.conn, provider["id"], group_ids=["group-invalid"])
+        finally:
+            MockEntraDirectoryConnector._users = original_users
+
+        self.assertEqual(preview["job"]["status"], "completed_with_errors")
+        self.assertEqual(preview["job"]["staged_count"], 1)
+        self.assertEqual(preview["job"]["invalid_count"], 1)
+        self.assertEqual(preview["staged_users"][0]["validation_status"], "invalid")
+        self.assertIn("Directory user is missing an external user id.", preview["staged_users"][0]["validation_errors"])
+        self.assertIn("Target name is required.", preview["staged_users"][0]["validation_errors"])
+        self.assertEqual(sync_result["job"]["status"], "completed_with_errors")
+        self.assertEqual(sync_result["job"]["imported_count"], 0)
+        self.assertEqual(sync_result["job"]["skipped_count"], 1)
+        self.assertEqual(sync_result["job"]["invalid_count"], 1)
+
+        imported_count = self.conn.execute(
+            "SELECT COUNT(*) FROM simulation_targets WHERE source = 'directory'"
+        ).fetchone()[0]
+        self.assertEqual(imported_count, 0)
 
 
 if __name__ == "__main__":

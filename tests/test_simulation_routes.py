@@ -1064,15 +1064,33 @@ class SimulationRoutesTest(unittest.TestCase):
         )
         provider_id = create_response.get_json()["provider"]["id"]
 
+        test_response = self.client.post(
+            "/api/integrations/directory/providers/{}/test".format(provider_id),
+            json={},
+        )
         groups_response = self.client.get(
             "/api/integrations/directory/providers/{}/groups".format(provider_id)
         )
+        preview_response = self.client.post(
+            "/api/integrations/directory/providers/{}/preview".format(provider_id),
+            json={"group_ids": ["graph-group-placeholder"]},
+        )
+        test_payload = test_response.get_json()
         payload = groups_response.get_json()
+        preview_payload = preview_response.get_json()
 
+        self.assertEqual(test_response.status_code, 400)
+        self.assertEqual(test_payload["status"], "error")
+        self.assertEqual(test_payload["error"]["type"], "directory_provider_configuration")
+        self.assertIn("tenant_id", test_payload["error"]["message"])
         self.assertEqual(groups_response.status_code, 400)
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["error"]["type"], "directory_provider_configuration")
         self.assertIn("tenant_id", payload["error"]["message"])
+        self.assertEqual(preview_response.status_code, 400)
+        self.assertEqual(preview_payload["status"], "error")
+        self.assertEqual(preview_payload["error"]["type"], "directory_provider_configuration")
+        self.assertIn("tenant_id", preview_payload["error"]["message"])
 
     def test_directory_preview_sync_job_and_import_routes_preserve_audit_history(self):
         conn = sqlite3.connect(self.db_path)

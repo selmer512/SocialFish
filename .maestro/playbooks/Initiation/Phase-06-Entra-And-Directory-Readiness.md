@@ -61,11 +61,14 @@ This phase prepares SocialFish for Microsoft Entra ID target synchronization wit
   - Include wiki-links to `[[Simulation-Campaigns]]`, `[[Simulation-Target-Import]]`, and `[[Simulation-Metrics]]`
   - Document mock mode, future Microsoft Graph settings, field mapping, sync preview, and duplicate handling
 
-- [ ] Add automated directory integration coverage:
+- [x] Add automated directory integration coverage:
   - Test mock group listing, preview, staged user validation, sync import, and duplicate prevention
   - Test provider setting secret redaction
   - Test campaign targeting can include directory-synced users
   - Test incomplete Microsoft Graph configuration fails safely with actionable UI/API errors
+  - Completed with additional service and route coverage for invalid staged directory users, safe Graph test/group/preview errors, and the existing mock group/preview/sync/import/duplicate/campaign targeting flows.
+  - Fixed invalid missing-external-ID directory users so they stage as validation failures instead of tripping the `staged_directory_users.external_user_id` constraint.
+  - Verified with `python -m unittest discover tests`.
 
 - [ ] Run directory readiness verification:
   - Run the directory integration tests

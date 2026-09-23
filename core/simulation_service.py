@@ -3150,8 +3150,10 @@ def _stage_directory_sync_users(conn, provider, job_id, result):
     for user in result.users:
         user_errors = []
         target_payload = {}
+        staged_external_user_id = _normalize_text(user.external_user_id)
         if not _normalize_text(user.external_user_id):
             user_errors.append("Directory user is missing an external user id.")
+            staged_external_user_id = "missing-external-user-id-{}-{}".format(job_id, staged_count + 1)
         try:
             target_payload = map_directory_user_to_target(conn, provider["id"], user)
             target_payload["source_reference"] = user.external_user_id
@@ -3191,7 +3193,7 @@ def _stage_directory_sync_users(conn, provider, job_id, result):
             (
                 provider["id"],
                 job_id,
-                user.external_user_id,
+                staged_external_user_id,
                 user.user_principal_name,
                 user.mail,
                 user.display_name,
