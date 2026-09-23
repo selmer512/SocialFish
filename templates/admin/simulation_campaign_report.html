@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>SocialFish Campaign Report</title>
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <style>
+        body { color: #222; font-size: 14px; }
+        .report-page { max-width: 1080px; margin: 24px auto; }
+        .report-actions { text-align: right; margin-bottom: 16px; }
+        .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 18px 0; }
+        .summary-cell { border: 1px solid #ddd; padding: 12px; }
+        .summary-cell strong { display: block; font-size: 26px; }
+        table { font-size: 13px; }
+        @media print {
+            .report-actions { display: none; }
+            .report-page { margin: 0; max-width: none; }
+            a { color: #222; text-decoration: none; }
+        }
+    </style>
+</head>
+<body>
+    <main class="report-page">
+        <div class="report-actions">
+            <a class="btn btn-outline-secondary btn-sm" href="/simulations/campaigns/{{ campaign.id }}">Back to Campaign</a>
+            <button class="btn btn-primary btn-sm" onclick="window.print()">Print</button>
+        </div>
+
+        <h1>{{ campaign.name }}</h1>
+        <p class="text-muted mb-1">Simulation campaign report</p>
+        <p>
+            <strong>Status:</strong> {{ campaign.status }}
+            <span class="text-muted">|</span>
+            <strong>Owner:</strong> {{ campaign.training_owner or "Not assigned" }}
+            <span class="text-muted">|</span>
+            <strong>Window:</strong> {{ campaign.start_date or "unscheduled" }} to {{ campaign.end_date or "unscheduled" }}
+        </p>
+        <p>{{ campaign.objective or campaign.description or "No objective recorded." }}</p>
+
+        {% if filters %}
+        <div class="alert alert-secondary" role="alert">
+            <strong>Filters:</strong>
+            Channel {{ filters.channels|join(", ") if filters.channels else "all" }},
+            department {{ filters.department or "all" }},
+            delivery status {{ filters.delivery_status or "all" }},
+            dates {{ filters.start_date or "beginning" }} to {{ filters.end_date or "latest" }}.
+        </div>
+        {% endif %}
+
+        <section>
+            <h2>Summary</h2>
+            <div class="summary-grid">
+                <div class="summary-cell"><strong>{{ metrics.aggregate.total_targets }}</strong>Targets</div>
+                <div class="summary-cell"><strong>{{ metrics.aggregate.delivered }}</strong>Delivered</div>
+                <div class="summary-cell"><strong>{{ metrics.aggregate.opened }}</strong>Opened</div>
+                <div class="summary-cell"><strong>{{ metrics.aggregate.link_clicked }}</strong>Clicked</div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Delivery Funnel</h2>
+            <table class="table table-bordered">
+                <thead>
+                    <tr><th>Step</th><th>Count</th><th>Rate</th><th>Description</th></tr>
+                </thead>
+                <tbody>
+                    {% for step in reporting.delivery_funnel %}
+                    <tr>
+                        <td>{{ step.label }}</td>
+                        <td>{{ step.count }}</td>
+                        <td>{{ (step.rate * 100)|round(1) }}%</td>
+                        <td>{{ step.description }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Channel Status</h2>
+            <table class="table table-bordered">
+                <thead>
+                    <tr><th>Channel</th><th>Targets</th><th>Delivered</th><th>Failed</th><th>Opened</th><th>Clicked</th><th>Attachment</th><th>Voice</th></tr>
+                </thead>
+                <tbody>
+                    {% for channel, row in metrics.channels.items() %}
+                    <tr>
+                        <td>{{ channel|upper }}</td>
+                        <td>{{ row.total_targets }}</td>
+                        <td>{{ row.delivered }} ({{ (row.delivered_rate * 100)|round(1) }}%)</td>
+                        <td>{{ row.failed }}</td>
+                        <td>{{ row.opened }} ({{ (row.opened_rate * 100)|round(1) }}%)</td>
+                        <td>{{ row.link_clicked }} ({{ (row.link_clicked_rate * 100)|round(1) }}%)</td>
+                        <td>{{ row.attachment_opened }}</td>
+                        <td>{{ row.voice_responses }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="8">No channel metrics match the current filters.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Target Metrics</h2>
+            <table class="table table-bordered">
+                <thead>
+                    <tr><th>Target</th><th>Department</th><th>Channel</th><th>Status</th><th>Opened</th><th>Clicked</th><th>Attachment</th><th>Voice</th></tr>
+                </thead>
+                <tbody>
+                    {% for target in metrics.targets %}
+                    <tr>
+                        <td>{{ target.display_name or target.name }}</td>
+                        <td>{{ target.department or "Unassigned" }}</td>
+                        <td>{{ target.channel|upper }}</td>
+                        <td>{{ target.delivery_status }}</td>
+                        <td>{{ target.opened }}</td>
+                        <td>{{ target.link_clicked }}</td>
+                        <td>{{ target.attachment_opened }}</td>
+                        <td>{{ target.voice_responses }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="8">No target metrics match the current filters.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Event Sources</h2>
+            <table class="table table-bordered">
+                <thead>
+                    <tr><th>Source</th><th>Events</th></tr>
+                </thead>
+                <tbody>
+                    {% for source, count in reporting.source_counts.items() %}
+                    <tr><td>{{ source }}</td><td>{{ count }}</td></tr>
+                    {% else %}
+                    <tr><td colspan="2">No events recorded yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    </main>
+</body>
+</html>

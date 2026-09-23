@@ -54,11 +54,17 @@ This phase modernizes reporting so the Cybersecurity Team can understand campaig
   - Linked funnel rows to the target/event tables and channel rows to filtered Simulation Metrics views.
   - Added service and route coverage for campaign detail reporting rollups, event source classification, and rendered reporting UI.
 
-- [ ] Add export functionality:
+- [x] Add export functionality:
   - Add CSV export for campaign target metrics
   - Add JSON export for campaign events
   - Add a simple HTML report view suitable for printing or saving to PDF from the browser
   - Ensure exports omit provider secrets and redact sensitive fields where appropriate
+
+  Completion notes, 2026-09-23:
+  - Added campaign target metrics CSV exports, campaign events JSON exports, and printable campaign report pages.
+  - Linked export actions from campaign detail pages and reused normalized metrics helpers for exported target rows.
+  - Added recursive event metadata redaction for secrets, tokens, credentials, passwords, and API keys before JSON export.
+  - Added route coverage for CSV, JSON, print report rendering, and redaction behavior.
 
 - [ ] Add structured reporting documentation while implementing dashboards:
   - Create `docs/features/simulation-metrics.md` with YAML front matter using type `reference`, tags for `metrics`, `reporting`, and `simulations`

@@ -529,6 +529,80 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"value=\"2026-09-22\"", response.data)
         self.assertIn(b"Risk", response.data)
 
+    def test_campaign_reporting_exports_csv_json_and_printable_report(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            campaign = create_campaign(
+                conn,
+                "Export Metrics Campaign",
+                status="active",
+                selected_channels=["email"],
+            )
+            target = create_target(
+                conn,
+                campaign["id"],
+                name="Export Metrics Target",
+                email="export.metrics@example.test",
+                department="Finance",
+                channel="email",
+            )
+            record_simulation_event(
+                conn,
+                campaign["id"],
+                "delivered",
+                target_id=target["id"],
+                channel="email",
+                provider="smtp_email",
+                provider_event_id="evt-export-route",
+                metadata={
+                    "source": "provider-webhook",
+                    "webhook_secret": "route-export-secret",
+                    "nested": {"api_key": "route-export-api-key"},
+                },
+            )
+            record_simulation_event(
+                conn,
+                campaign["id"],
+                "link_click",
+                target_id=target["id"],
+                channel="email",
+                metadata={"source": "tracking-token"},
+            )
+        finally:
+            conn.close()
+
+        csv_response = self.client.get(
+            "/simulations/campaigns/{}/targets/metrics.csv?department=Finance".format(campaign["id"])
+        )
+        self.assertEqual(csv_response.status_code, 200)
+        self.assertEqual(csv_response.mimetype, "text/csv")
+        self.assertIn(
+            "attachment; filename=simulation-campaign-{}-target-metrics.csv".format(campaign["id"]),
+            csv_response.headers["Content-Disposition"],
+        )
+        self.assertIn(b"target_id", csv_response.data)
+        self.assertIn(b"display_name", csv_response.data)
+        self.assertIn(b"Export Metrics Target", csv_response.data)
+        self.assertIn(b"link_clicked", csv_response.data)
+
+        json_response = self.client.get("/simulations/campaigns/{}/events.json".format(campaign["id"]))
+        payload = json.loads(json_response.data.decode("utf-8"))
+        self.assertEqual(json_response.status_code, 200)
+        self.assertEqual(json_response.mimetype, "application/json")
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["campaign"]["name"], "Export Metrics Campaign")
+        self.assertEqual(len(payload["events"]), 2)
+        self.assertNotIn("route-export-secret", json_response.data.decode("utf-8"))
+        self.assertNotIn("route-export-api-key", json_response.data.decode("utf-8"))
+        self.assertIn("[REDACTED]", json_response.data.decode("utf-8"))
+
+        report_response = self.client.get("/simulations/campaigns/{}/report?department=Finance".format(campaign["id"]))
+        self.assertEqual(report_response.status_code, 200)
+        self.assertIn(b"Simulation campaign report", report_response.data)
+        self.assertIn(b"Export Metrics Campaign", report_response.data)
+        self.assertIn(b"Target Metrics", report_response.data)
+        self.assertIn(b"Event Sources", report_response.data)
+
     def test_events_api_records_allowed_lab_events(self):
         response = self.client.post(
             "/api/simulations/events",

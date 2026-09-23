@@ -109,6 +109,49 @@ TRACKING_PIXEL_GIF = (
     b"\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00"
     b"\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
 )
+SIMULATION_TARGET_METRIC_EXPORT_FIELDS = (
+    "campaign_id",
+    "campaign_name",
+    "target_id",
+    "display_name",
+    "name",
+    "email",
+    "phone",
+    "department",
+    "channel",
+    "delivery_status",
+    "total_targets",
+    "queued",
+    "sent",
+    "delivered",
+    "failed",
+    "opened",
+    "forwarded",
+    "deleted",
+    "link_clicked",
+    "attachment_opened",
+    "voice_responses",
+    "delivered_rate",
+    "opened_rate",
+    "forwarded_rate",
+    "deleted_rate",
+    "link_clicked_rate",
+    "attachment_opened_rate",
+    "voice_responses_rate",
+)
+SENSITIVE_EXPORT_KEYS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "credential",
+    "credentials",
+    "password",
+    "secret",
+    "secret_placeholder",
+    "token",
+    "webhook_secret",
+}
 
 # Verificar argumentos
 if len(argv) < 2:
@@ -243,6 +286,76 @@ def _risk_level(score):
     if score >= 2:
         return "Medium"
     return "Low"
+
+
+def _redact_export_value(value):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, nested_value in value.items():
+            normalized_key = str(key or "").strip().lower()
+            if normalized_key in SENSITIVE_EXPORT_KEYS or any(token in normalized_key for token in ("secret", "password", "token", "credential", "api_key")):
+                redacted[key] = "[REDACTED]"
+            else:
+                redacted[key] = _redact_export_value(nested_value)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_export_value(item) for item in value]
+    return value
+
+
+def _safe_event_export(event):
+    exported = {
+        "id": event.get("id"),
+        "campaign_id": event.get("campaign_id"),
+        "target_id": event.get("target_id"),
+        "target_display_name": event.get("target_display_name"),
+        "target_name": event.get("target_name"),
+        "channel": event.get("channel"),
+        "event_type": event.get("event_type"),
+        "delivery_status": event.get("delivery_status"),
+        "delivery_job_id": event.get("delivery_job_id"),
+        "delivery_attempt_id": event.get("delivery_attempt_id"),
+        "tracking_token_id": event.get("tracking_token_id"),
+        "provider_reference_id": event.get("provider_reference_id"),
+        "provider": event.get("provider"),
+        "provider_event_id": event.get("provider_event_id"),
+        "error_message": event.get("error_message"),
+        "retry_count": event.get("retry_count"),
+        "occurred_at": event.get("occurred_at"),
+        "created_at": event.get("created_at"),
+    }
+    metadata = event.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            metadata = {}
+    exported["metadata"] = _redact_export_value(metadata or {})
+    source = event.get("source")
+    if source:
+        exported["source"] = source
+    return exported
+
+
+def _target_metrics_csv_response(campaign, targets, filters):
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=SIMULATION_TARGET_METRIC_EXPORT_FIELDS, lineterminator="\n")
+    writer.writeheader()
+    for target in targets:
+        writer.writerow({
+            field: target.get(field, "")
+            for field in SIMULATION_TARGET_METRIC_EXPORT_FIELDS
+        })
+    filename = "simulation-campaign-{}-target-metrics.csv".format(campaign["id"])
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename={}".format(filename),
+            "Cache-Control": "no-store",
+            "X-SocialFish-Export-Filters": json.dumps(filters or {}, sort_keys=True),
+        },
+    )
 
 
 def _form_bool(value):
@@ -1014,6 +1127,68 @@ def simulation_campaign_target_metrics_api(campaign_id):
         })
     except (TypeError, ValueError) as e:
         return _json_error("simulation_target_metrics_error", str(e), 400)
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>/targets/metrics.csv", methods=['GET'])
+@flask_login.login_required
+def simulation_campaign_target_metrics_csv(campaign_id):
+    try:
+        detail = get_campaign_detail(g.db, campaign_id)
+        filters = _simulation_metric_filters()
+        targets = get_target_metrics(g.db, campaign_id, filters)
+        return _target_metrics_csv_response(detail["campaign"], targets, get_campaign_metrics(g.db, campaign_id, filters)["filters"])
+    except (TypeError, ValueError) as e:
+        return Response(str(e), status=400, mimetype="text/plain")
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>/events.json", methods=['GET'])
+@flask_login.login_required
+def simulation_campaign_events_json(campaign_id):
+    try:
+        detail = get_campaign_detail(g.db, campaign_id)
+        events = [_safe_event_export(event) for event in detail["reporting"]["events"]]
+        payload = {
+            "status": "ok",
+            "campaign": {
+                "id": detail["campaign"]["id"],
+                "name": detail["campaign"]["name"],
+                "status": detail["campaign"]["status"],
+            },
+            "events": events,
+            "redaction": {
+                "provider_secrets": "omitted",
+                "sensitive_metadata_fields": "redacted",
+            },
+        }
+        return Response(
+            json.dumps(payload, indent=2, sort_keys=True),
+            mimetype="application/json",
+            headers={
+                "Content-Disposition": "attachment; filename=simulation-campaign-{}-events.json".format(campaign_id),
+                "Cache-Control": "no-store",
+            },
+        )
+    except (TypeError, ValueError) as e:
+        return _json_error("simulation_events_export_error", str(e), 400)
+
+
+@app.route("/simulations/campaigns/<int:campaign_id>/report", methods=['GET'])
+@flask_login.login_required
+def simulation_campaign_print_report(campaign_id):
+    try:
+        detail = get_campaign_detail(g.db, campaign_id)
+        filters = _simulation_metric_filters()
+        metrics = get_campaign_metrics(g.db, campaign_id, filters)
+        return render_template(
+            'admin/simulation_campaign_report.html',
+            campaign=detail["campaign"],
+            metrics=metrics,
+            reporting=detail["reporting"],
+            filters=metrics["filters"],
+        )
+    except (TypeError, ValueError) as e:
+        flash(str(e), "danger")
+        return redirect("/simulations/campaigns")
 
 
 @app.route("/api/simulations/metrics/overview", methods=['GET'])

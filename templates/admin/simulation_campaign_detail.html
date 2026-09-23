@@ -29,6 +29,15 @@
                 <div class="row">
                     <div class="col-md-8"><h3 class="title-5 m-b-35">{{ campaign.name }}</h3></div>
                     <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-outline-secondary btn-sm" href="/simulations/campaigns/{{ campaign.id }}/targets/metrics.csv">
+                            <i class="fas fa-file-csv"></i>&nbsp; Target CSV
+                        </a>
+                        <a class="btn btn-outline-secondary btn-sm" href="/simulations/campaigns/{{ campaign.id }}/events.json">
+                            <i class="fas fa-file-code"></i>&nbsp; Events JSON
+                        </a>
+                        <a class="btn btn-outline-secondary btn-sm" href="/simulations/campaigns/{{ campaign.id }}/report">
+                            <i class="fas fa-print"></i>&nbsp; Print Report
+                        </a>
                         <a class="btn btn-success btn-sm" href="/simulations/ai-builder?campaign_id={{ campaign.id }}">
                             <i class="fas fa-magic"></i>&nbsp; AI Builder
                         </a>
