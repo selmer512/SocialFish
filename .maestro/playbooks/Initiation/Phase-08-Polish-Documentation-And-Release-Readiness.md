@@ -70,11 +70,17 @@ This phase consolidates the modernization into a maintainable release candidate.
   - Added `SimulationRoutesTest.test_full_simulation_workflow_regression` to exercise the authenticated Flask workflow end to end: protected route checks, campaign authorization, manual and CSV targets, mock AI draft generation/save, dry-run delivery, public tracking routes, metrics/export endpoints, mock Entra preview/sync, and expected administrative audit actions.
   - Verified with `python -m unittest tests.test_simulation_routes.SimulationRoutesTest.test_full_simulation_workflow_regression` and `python -m unittest discover tests`.
 
-- [ ] Add a UI smoke runner or script if one does not already exist:
+- [x] Add a UI smoke runner or script if one does not already exist:
   - Start the Flask app with test credentials in a controlled local process
   - Log in through the normal `/neptune` flow using automated HTTP requests or browser automation available in the repo
   - Visit the main simulation pages and assert expected page titles or stable text
   - Stop the local process cleanly after verification
+
+  Completion notes:
+  - Added `scripts/ui_smoke.py`, which starts `SocialFish.py` as a subprocess with temporary test credentials, an isolated SQLite database under `.maestro/playbooks/Working`, a loopback host, and a free local port.
+  - The runner logs in through `/neptune`, checks `/simulations`, `/simulations/campaigns`, seeded campaign detail, `/simulations/ai-builder`, `/ai-settings`, `/simulations/metrics`, `/integrations/directory`, and `/audit-log` for stable page text, then terminates the process cleanly.
+  - Added environment overrides for `SOCIALFISH_DATABASE`, `SOCIALFISH_HOST`, and `SOCIALFISH_PORT` so smoke runs avoid the repo database and fixed port collisions while preserving the existing defaults.
+  - Verified with `python scripts/ui_smoke.py`, `python -m py_compile core/config.py SocialFish.py scripts/ui_smoke.py`, and `python -m unittest discover tests`.
 
 - [ ] Run the full release-readiness verification:
   - Run all available automated tests and smoke scripts

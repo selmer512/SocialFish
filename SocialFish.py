@@ -3216,7 +3216,9 @@ def main():
         initDB(DATABASE)
         migrate_db(DATABASE)
         # Inicia o servidor com SocketIO
-        socketio.run(app, host="0.0.0.0", port=5000, debug=False)
+        host = os.environ.get("SOCIALFISH_HOST", "0.0.0.0")
+        port = int(os.environ.get("SOCIALFISH_PORT", "5000"))
+        socketio.run(app, host=host, port=port, debug=False)
 
 if __name__ == "__main__":
     try:
