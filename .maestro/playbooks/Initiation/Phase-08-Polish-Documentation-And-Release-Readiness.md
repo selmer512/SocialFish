@@ -37,10 +37,14 @@ This phase consolidates the modernization into a maintainable release candidate.
   - Updated `Dockerfile` to Python 3.12 and direct `requirements.txt` installation so `datetime.UTC` imports in modernization modules work in containers.
   - Removed the obsolete Compose `version` field while preserving the existing service, port, logging, and startup command.
 
-- [ ] Create a structured feature index:
+- [x] Create a structured feature index:
   - Create `docs/features/simulation-platform-index.md` with YAML front matter using type `reference`, tags for `simulations`, `ai`, `metrics`, and `operations`
   - Link to `[[Simulation-Campaigns]]`, `[[Simulation-Target-Import]]`, `[[AI-Scenario-Generation]]`, `[[Simulation-Delivery-Tracking]]`, `[[Simulation-Metrics]]`, `[[Entra-Directory-Integration]]`, and `[[Simulation-Safety-Audit]]`
   - Summarize the UI locations, data flows, and safe operating assumptions for each feature
+
+  Completion notes:
+  - Added `docs/features/simulation-platform-index.md` with structured front matter, required feature wiki-links, a UI/data-flow/safety feature map, an end-to-end Mermaid flow, operating modes, and a safe operating checklist.
+  - Verified the index content against the existing feature references and admin templates for current UI route names.
 
 - [ ] Add or update developer-facing run documentation:
   - Update existing setup or quick-start documentation with GUI-first instructions for launching the app and accessing the new simulation pages
