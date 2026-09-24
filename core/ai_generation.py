@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
+from core.simulation_utils import clean_text as _clean_text
+
 
 AI_GENERATION_LABEL = "authorized_security_awareness_training"
 VALID_AI_CHANNELS = {"email", "sms", "voice"}
@@ -16,11 +18,6 @@ BLOCKED_OUTPUT_PATTERNS = (
     (re.compile(r"(?<!do not )(?<!never )\b(enter|submit|provide|share|send)\b.{0,40}\b(passwords?|credentials?|logins?|tokens?|mfa|otp)\b", re.I), "credential_harvesting_output"),
     (re.compile(r"\b(ignore|bypass|disable)\b.{0,40}\b(security|mfa|2fa|warning|filter)\b", re.I), "offensive_capability_output"),
 )
-
-
-def _clean_text(value):
-    normalized = str(value or "").strip()
-    return normalized or None
 
 
 def _normalize_channels(channels):

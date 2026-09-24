@@ -13,11 +13,17 @@ This phase consolidates the modernization into a maintainable release candidate.
   - Login guards: authenticated simulation, AI settings, directory, metrics, delivery status, audit, and export surfaces have `flask_login.login_required`. Public simulation tracking endpoints and provider webhooks are intentionally unauthenticated and should retain token/signature validation instead of a login guard.
   - Template style drift: the new simulation templates are full HTML documents rather than extending a shared admin layout, and they rely heavily on inline `style` attributes and hard-coded paths. Breadcrumbs also alternate between `/creds`, `/simulations`, `/simulations/campaigns`, `/audit-log`, and `/integrations/directory`, so cleanup should standardize navigation without breaking existing URLs.
 
-- [ ] Consolidate simulation services and utilities:
+- [x] Consolidate simulation services and utilities:
   - Move duplicated database, validation, redaction, metrics, and provider-selection logic into shared helpers where the existing project structure supports it
   - Keep route handlers thin and focused on request/response behavior
   - Preserve backwards compatibility for existing SocialFish routes
   - Avoid broad rewrites outside the simulation modernization surface
+
+  Completion notes:
+  - Added `core/simulation_utils.py` for shared JSON parsing, cursor row mapping, timestamp generation, text normalization, redaction, boolean coercion, choice validation, and enabled-provider selection.
+  - Reused those helpers from `core/simulation_service.py`, `core/audit_service.py`, `core/ai_generation.py`, `core/delivery_adapters.py`, `core/directory_connectors.py`, and simulation-related route helpers in `SocialFish.py`.
+  - Added `tests/test_simulation_utils.py` to lock the shared helper behavior.
+  - Verified with `python -m py_compile SocialFish.py core\simulation_utils.py core\simulation_service.py core\audit_service.py core\delivery_adapters.py core\directory_connectors.py core\ai_generation.py` and `python -m unittest discover tests`.
 
 - [ ] Update dependency documentation and configuration:
   - Review `requirements.txt`, `Dockerfile`, `docker-compose.yml`, setup instructions, and imports introduced by the modernization work

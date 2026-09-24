@@ -1,57 +1,13 @@
-from datetime import UTC, datetime, time
-import json
+from datetime import datetime, time
 
-
-REDACTED_VALUE = "[redacted]"
-
-SECRET_KEY_FRAGMENTS = (
-    "api_key",
-    "apikey",
-    "authorization",
-    "bearer",
-    "client_secret",
-    "cookie",
-    "credential",
-    "password",
-    "private_key",
-    "refresh_token",
-    "secret",
-    "session",
-    "token",
+from core.simulation_utils import (
+    REDACTED_VALUE,
+    clean_text as _normalize_text,
+    json_loads as _safe_json_loads,
+    redact_sensitive_value,
+    safe_json_dumps as _safe_json_dumps,
+    utc_now as _utc_now,
 )
-
-SAFE_SECRET_KEY_SUFFIXES = (
-    "_placeholder",
-    "_reference",
-    "placeholder",
-    "reference",
-)
-
-
-def _utc_now():
-    return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-def _normalize_text(value):
-    if value is None:
-        return None
-    normalized = str(value).strip()
-    return normalized or None
-
-
-def _safe_json_loads(value, fallback):
-    if value is None:
-        return fallback
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(value)
-    except (TypeError, ValueError):
-        return fallback
-
-
-def _safe_json_dumps(value):
-    return json.dumps(value or {}, sort_keys=True)
 
 
 def _normalize_date_bound(value, end_of_day=False):
@@ -64,26 +20,9 @@ def _normalize_date_bound(value, end_of_day=False):
     return parsed.isoformat(timespec="seconds")
 
 
-def _is_sensitive_key(key):
-    normalized = str(key or "").lower()
-    if normalized.endswith(SAFE_SECRET_KEY_SUFFIXES):
-        return False
-    return any(fragment in normalized for fragment in SECRET_KEY_FRAGMENTS)
-
-
 def redact_audit_metadata(value):
     """Return audit metadata with plaintext secret fields removed recursively."""
-    if isinstance(value, dict):
-        redacted = {}
-        for key, nested in value.items():
-            if _is_sensitive_key(key):
-                redacted[key] = REDACTED_VALUE
-            else:
-                redacted[key] = redact_audit_metadata(nested)
-        return redacted
-    if isinstance(value, list):
-        return [redact_audit_metadata(item) for item in value]
-    return value
+    return redact_sensitive_value(value, REDACTED_VALUE)
 
 
 def _audit_event_response(row):

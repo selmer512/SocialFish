@@ -1,6 +1,5 @@
 import csv
 from dataclasses import asdict, is_dataclass
-from datetime import UTC, datetime
 import hashlib
 from io import StringIO
 import json
@@ -8,6 +7,17 @@ import re
 import secrets
 
 from core.db_migration import SIMULATION_DEMO_SLUG
+from core.simulation_utils import (
+    clean_text as _normalize_text,
+    db_bool as _bool,
+    json_dict as _json_dict,
+    json_list as _json_list,
+    row_to_dict as _row_to_dict,
+    rows_to_dicts as _rows_to_dicts,
+    safe_json_dumps as _safe_json_dumps,
+    select_enabled_provider,
+    utc_now as _utc_now,
+)
 
 
 VALID_SIMULATION_CHANNELS = {"email", "sms", "voice"}
@@ -122,51 +132,6 @@ METRIC_COUNT_FIELDS = (
 DELIVERY_STATUS_METRICS = {"queued", "sent", "delivered", "failed"}
 
 
-def _utc_now():
-    return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-def _rows_to_dicts(cursor):
-    columns = [description[0] for description in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-
-def _row_to_dict(cursor):
-    row = cursor.fetchone()
-    if row is None:
-        return None
-    columns = [description[0] for description in cursor.description]
-    return dict(zip(columns, row))
-
-
-def _bool(value):
-    return bool(int(value or 0))
-
-
-def _json_list(value):
-    if not value:
-        return []
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        return []
-    if isinstance(parsed, list):
-        return parsed
-    return []
-
-
-def _json_dict(value):
-    if not value:
-        return {}
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        return {}
-    if isinstance(parsed, dict):
-        return parsed
-    return {}
-
-
 def _audit_response(row):
     if not row:
         return None
@@ -189,10 +154,6 @@ def _ai_draft_response(row):
     draft["safety_notes"] = _json_list(draft.get("safety_notes"))
     draft["metadata"] = _json_dict(draft.get("metadata"))
     return draft
-
-
-def _safe_json_dumps(value):
-    return json.dumps(value or {}, sort_keys=True)
 
 
 def _event_metadata(value):
@@ -289,13 +250,6 @@ def _record_ai_generation_audit(
     )
     conn.commit()
     return cursor.lastrowid
-
-
-def _normalize_text(value):
-    if value is None:
-        return None
-    normalized = str(value).strip()
-    return normalized or None
 
 
 def _normalize_status(status):
@@ -1890,13 +1844,9 @@ def _provider_for_channel(conn, channel, provider_ids=None, mode="dry_run"):
         return provider
 
     providers = list_delivery_provider_settings(conn, channel=channel)
-    if mode == "dry_run":
-        for provider in providers:
-            if provider["provider_type"] == "dry_run" and provider["enabled"]:
-                return provider
-    for provider in providers:
-        if provider["enabled"]:
-            return provider
+    provider = select_enabled_provider(providers, preferred_type="dry_run" if mode == "dry_run" else None)
+    if provider:
+        return provider
     raise ValueError("No enabled {} delivery provider is configured.".format(channel))
 
 

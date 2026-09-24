@@ -1,39 +1,15 @@
 from dataclasses import dataclass, field
-import json
-from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
+from typing import Any, Dict, Optional, Protocol, Sequence, Tuple, runtime_checkable
+
+from core.simulation_utils import (
+    clean_text as _clean_text,
+    json_dict as _json_dict,
+    json_list as _json_list,
+)
 
 
 DIRECTORY_SIMULATION_LABEL = "authorized_directory_target_sync"
 VALID_DIRECTORY_PROVIDER_TYPES = {"mock_entra", "microsoft_graph"}
-
-
-def _clean_text(value):
-    normalized = str(value or "").strip()
-    return normalized or None
-
-
-def _json_dict(value):
-    if not value:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _json_list(value):
-    if not value:
-        return []
-    if isinstance(value, (list, tuple)):
-        return list(value)
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        return []
-    return parsed if isinstance(parsed, list) else []
 
 
 def _normalize_provider_type(provider_type):

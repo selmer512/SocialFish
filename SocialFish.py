@@ -83,6 +83,11 @@ from core.ai_generation import (
     AIProviderTypeError,
     AIScenarioRequest,
 )
+from core.simulation_utils import (
+    json_dict as _shared_json_dict,
+    json_list as _shared_json_list,
+    redact_sensitive_value,
+)
 from core.tunnel_manager import TunnelManager
 from core.recorder_playwright import PlaywrightRecorder
 from core.cookie_inspector import CookieInspector
@@ -391,18 +396,7 @@ def _risk_level(score):
 
 
 def _redact_export_value(value):
-    if isinstance(value, dict):
-        redacted = {}
-        for key, nested_value in value.items():
-            normalized_key = str(key or "").strip().lower()
-            if normalized_key in SENSITIVE_EXPORT_KEYS or any(token in normalized_key for token in ("secret", "password", "token", "credential", "api_key")):
-                redacted[key] = "[REDACTED]"
-            else:
-                redacted[key] = _redact_export_value(nested_value)
-        return redacted
-    if isinstance(value, list):
-        return [_redact_export_value(item) for item in value]
-    return value
+    return redact_sensitive_value(value, "[REDACTED]")
 
 
 def _safe_event_export(event):
@@ -650,11 +644,9 @@ def _payload_list(value):
     if isinstance(value, (list, tuple)):
         return [str(item).strip() for item in value if str(item).strip()]
     if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except ValueError:
-            parsed = None
-        if isinstance(parsed, list):
+        stripped = value.strip()
+        parsed = _shared_json_list(stripped)
+        if stripped.startswith("["):
             return [str(item).strip() for item in parsed if str(item).strip()]
         return [item.strip() for item in value.split(",") if item.strip()]
     return [str(value).strip()]
@@ -665,13 +657,7 @@ def _payload_dict(value):
         return {}
     if isinstance(value, dict):
         return dict(value)
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except ValueError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
+    return _shared_json_dict(value)
 
 
 def _directory_settings_payload(data):
