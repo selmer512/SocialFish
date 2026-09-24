@@ -9,6 +9,7 @@ from core.simulation_service import (
     archive_campaign,
     archive_target,
     build_delivery_preview,
+    check_campaign_delivery_readiness,
     create_campaign,
     create_delivery_job_from_campaign,
     create_target,
@@ -738,6 +739,27 @@ Broken Voice,,,voice,Support,Morgan
         self.assertEqual(preview["providers"]["email"]["provider_key"], "dry_run_email")
         self.assertIn("Authorized", preview["messages"]["email"]["subject"])
 
+    def test_delivery_readiness_blocks_incomplete_campaign_before_job_creation(self):
+        campaign = create_campaign(
+            self.conn,
+            "Incomplete Readiness Campaign",
+            selected_channels=["email"],
+        )
+
+        readiness = check_campaign_delivery_readiness(self.conn, campaign["id"])
+
+        self.assertFalse(readiness["ready"])
+        self.assertIn("authorization_statement", {check["key"] for check in readiness["failed_checks"]})
+        self.assertIn("target_count", {check["key"] for check in readiness["failed_checks"]})
+        with self.assertRaisesRegex(ValueError, "not ready for delivery"):
+            create_delivery_job_from_campaign(self.conn, campaign["id"])
+
+        job_count = self.conn.execute(
+            "SELECT COUNT(*) FROM simulation_delivery_jobs WHERE campaign_id = ?",
+            (campaign["id"],),
+        ).fetchone()[0]
+        self.assertEqual(job_count, 0)
+
     def test_creates_and_runs_dry_run_delivery_job_for_all_channels(self):
         created = create_delivery_job_from_campaign(
             self.conn,
@@ -870,52 +892,31 @@ Broken Voice,,,voice,Support,Morgan
         self.assertEqual(result["event"]["provider_reference_id"], result["provider"]["id"])
         self.assertEqual(result["tracking_token"]["event_count"], 1)
 
-    def test_configured_real_provider_shell_records_failed_attempt_without_external_delivery(self):
+    def test_disabled_real_provider_shell_is_blocked_by_readiness_check(self):
         smtp_provider = next(
             provider
             for provider in list_delivery_provider_settings(self.conn)
             if provider["provider_key"] == "smtp_email"
         )
-        created = create_delivery_job_from_campaign(
+        readiness = check_campaign_delivery_readiness(
             self.conn,
             self.campaign_id,
             provider_ids={"email": smtp_provider["id"]},
-            max_retries=1,
+            mode="provider",
         )
-        job_id = created["job"]["id"]
 
-        first_run = run_delivery_job(self.conn, job_id)
-        failed_attempts = [
-            attempt for attempt in first_run["attempts"]
-            if attempt["channel"] == "email"
-        ]
+        self.assertFalse(readiness["ready"])
+        self.assertIn("provider.email", {check["key"] for check in readiness["failed_checks"]})
+        with self.assertRaisesRegex(ValueError, "Enable the SMTP Email provider"):
+            create_delivery_job_from_campaign(
+                self.conn,
+                self.campaign_id,
+                provider_ids={"email": smtp_provider["id"]},
+                mode="provider",
+                max_retries=1,
+            )
 
-        self.assertEqual(first_run["job"]["status"], "completed_with_errors")
-        self.assertEqual(first_run["job"]["failed_count"], 2)
-        self.assertEqual(first_run["job"]["delivered_count"], 2)
-        self.assertTrue(all(attempt["status"] == "failed" for attempt in failed_attempts))
-        self.assertTrue(all("disabled" in attempt["error_message"] for attempt in failed_attempts))
-        self.assertTrue(all(attempt["provider_response"] == {} for attempt in failed_attempts))
-
-        failed_event_count = self.conn.execute(
-            """
-            SELECT COUNT(*)
-            FROM simulation_events
-            WHERE delivery_job_id = ? AND event_type = 'failed'
-            """,
-            (job_id,),
-        ).fetchone()[0]
-        self.assertEqual(failed_event_count, 2)
-
-        second_run = run_delivery_job(self.conn, job_id)
-        retried_attempts = [
-            attempt for attempt in second_run["attempts"]
-            if attempt["channel"] == "email"
-        ]
-        self.assertEqual(len(second_run["processed_attempts"]), 2)
-        self.assertTrue(all(attempt["retry_count"] == 1 for attempt in retried_attempts))
-
-    def test_incomplete_enabled_provider_shell_records_clear_configuration_failure(self):
+    def test_incomplete_enabled_provider_shell_is_blocked_by_readiness_check(self):
         sms_provider = next(
             provider
             for provider in list_delivery_provider_settings(self.conn)
@@ -927,22 +928,22 @@ Broken Voice,,,voice,Support,Morgan
             enabled=True,
             settings={"sender_id": "TRAINING"},
         )
-        created = create_delivery_job_from_campaign(
+        readiness = check_campaign_delivery_readiness(
             self.conn,
             self.campaign_id,
             provider_ids={"sms": configured_provider["id"]},
+            mode="provider",
         )
 
-        status = run_delivery_job(self.conn, created["job"]["id"])
-        failed_sms = next(
-            attempt for attempt in status["attempts"]
-            if attempt["channel"] == "sms"
-        )
-
-        self.assertEqual(status["job"]["status"], "completed_with_errors")
-        self.assertEqual(failed_sms["status"], "failed")
-        self.assertIn("api_key", failed_sms["error_message"])
-        self.assertEqual(failed_sms["provider_response"], {})
+        self.assertFalse(readiness["ready"])
+        self.assertIn("provider.sms", {check["key"] for check in readiness["failed_checks"]})
+        with self.assertRaisesRegex(ValueError, "Configure credentials for SMS API"):
+            create_delivery_job_from_campaign(
+                self.conn,
+                self.campaign_id,
+                provider_ids={"sms": configured_provider["id"]},
+                mode="provider",
+            )
 
 
 if __name__ == "__main__":

@@ -181,6 +181,21 @@
                     <strong>Dry-run mode is selected by default.</strong>
                     Starting a dry-run records delivery attempts, tracking tokens, and events without sending external email, SMS, or voice traffic.
                 </div>
+                <div id="delivery-readiness" class="alert alert-{{ 'success' if delivery_readiness.ready else 'warning' }}" role="alert">
+                    <strong>Delivery readiness:</strong>
+                    {% if delivery_readiness.ready %}Ready to start dry-run delivery.{% else %}Resolve the items below before starting delivery.{% endif %}
+                    <ul class="mb-0 mt-2">
+                        {% for check in delivery_readiness.checks %}
+                        <li>
+                            {% if check.ready %}
+                            <span class="badge badge-success">Ready</span> {{ check.message }}
+                            {% else %}
+                            <span class="badge badge-warning">Action needed</span> {{ check.action }}
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
                 <div class="row">
                     <div class="col-md-4">
                         <strong>{{ delivery_preview.total_targets }}</strong><br><small>Active targets in preview</small>
@@ -425,6 +440,13 @@
                     <div class="row form-group">
                         <div class="col col-md-3"><label class="form-control-label">Authorized Scope</label></div>
                         <div class="col-12 col-md-9"><textarea name="authorized_scope" rows="3" class="form-control">{{ campaign.authorized_scope }}</textarea></div>
+                    </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Authorization Statement</label></div>
+                        <div class="col-12 col-md-9">
+                            <textarea name="authorization_statement" rows="3" class="form-control" required>{{ campaign.authorization_statement }}</textarea>
+                            <small class="form-text text-muted">Record who authorized this internal security awareness simulation and the approved purpose.</small>
+                        </div>
                     </div>
                     <div class="card-footer" style="text-align: right;">
                         <button type="submit" class="btn btn-primary btn-sm">

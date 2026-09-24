@@ -50,11 +50,17 @@ This phase strengthens the modernization work with auditability, explicit author
   - Added campaign detail navigation to `/audit-log?campaign_id=...` so operators can review related administrative events from a campaign.
   - Added service and route tests covering audit filters, detail lookup, login protection behavior, campaign links, and redacted secret display.
 
-- [ ] Add authorized-use safety controls:
+- [x] Add authorized-use safety controls:
   - Add a required campaign authorization statement field for new campaigns
   - Add a campaign readiness check before delivery starts that verifies authorization statement, target count, channel content, and provider readiness
   - Block delivery start when readiness checks fail and show actionable UI messages
   - Keep dry-run delivery available for testing readiness logic
+
+  Completion notes:
+  - Added `authorization_statement` to simulation campaign schema, demo seed/backfill, campaign create/update flows, and authenticated campaign forms.
+  - Added reusable delivery readiness checks for authorization statement, active targets, channel content, and dry-run/provider settings readiness.
+  - Blocked delivery job creation and `/deliveries/start` when readiness fails, returning structured JSON errors or actionable UI flash messages.
+  - Added admin UI readiness checklist on campaign detail pages and automated service/route/migration coverage for blocked launches and provider readiness.
 
 - [ ] Improve API and form validation:
   - Add CSRF protection where compatible with the existing form stack or document a project-compatible alternative in code comments

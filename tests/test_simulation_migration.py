@@ -522,6 +522,7 @@ class SimulationMigrationTest(unittest.TestCase):
                     "training_url",
                     "start_date",
                     "end_date",
+                    "authorization_statement",
                     "archived_at",
                 }.issubset(campaign_columns)
             )

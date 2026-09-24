@@ -37,6 +37,7 @@ from core.simulation_service import (
     create_directory_provider_settings,
     create_target,
     generate_ai_scenario,
+    check_campaign_delivery_readiness,
     get_campaign_metrics,
     get_campaign_detail,
     get_delivery_job_status,
@@ -434,6 +435,7 @@ def _campaign_payload():
         "start_date": data.get("start_date"),
         "end_date": data.get("end_date"),
         "authorized_scope": data.get("authorized_scope"),
+        "authorization_statement": data.get("authorization_statement"),
     }
 
 
@@ -1022,6 +1024,8 @@ def new_simulation_campaign():
 def create_simulation_campaign():
     try:
         payload = _campaign_payload()
+        if payload.get("name") and not (payload.get("authorization_statement") or "").strip():
+            raise ValueError("Campaign authorization statement is required.")
         campaign = create_campaign(g.db, **payload)
         record_campaign_audit(
             g.db,
@@ -1033,6 +1037,7 @@ def create_simulation_campaign():
                     "status": campaign["status"],
                     "selected_channels": campaign["selected_channels"],
                     "authorized_scope_present": bool(campaign.get("authorized_scope")),
+                    "authorization_statement_present": bool(campaign.get("authorization_statement")),
                 }
             ),
         )
@@ -1071,6 +1076,7 @@ def simulation_campaign_detail(campaign_id):
         import_batches=detail["import_batches"],
         ai_drafts=detail["ai_drafts"],
         delivery_preview=detail["delivery_preview"],
+        delivery_readiness=check_campaign_delivery_readiness(g.db, campaign_id),
         delivery_jobs=detail["delivery_jobs"],
         delivery_providers=detail["delivery_providers"],
         target_filters=detail["target_filters"],
@@ -1121,6 +1127,25 @@ def preview_simulation_delivery(campaign_id):
 def start_simulation_delivery(campaign_id):
     try:
         payload = _delivery_payload()
+        readiness = check_campaign_delivery_readiness(
+            g.db,
+            campaign_id,
+            provider_ids=payload["provider_ids"],
+            mode=payload["mode"],
+        )
+        if not readiness["ready"]:
+            messages = [check["action"] for check in readiness["failed_checks"]]
+            message = "Campaign is not ready for delivery: {}".format(" ".join(messages))
+            if request.is_json:
+                return _json_error(
+                    "delivery_readiness_failed",
+                    message,
+                    400,
+                    readiness=readiness,
+                )
+            for action in messages:
+                flash(action, "danger")
+            return redirect("/simulations/campaigns/{}#delivery-readiness".format(campaign_id))
         created = create_delivery_job_from_campaign(
             g.db,
             campaign_id,
@@ -1257,6 +1282,7 @@ def update_simulation_campaign(campaign_id):
                     "status": campaign["status"],
                     "selected_channels": campaign["selected_channels"],
                     "authorized_scope_present": bool(campaign.get("authorized_scope")),
+                    "authorization_statement_present": bool(campaign.get("authorization_statement")),
                 }
             ),
         )

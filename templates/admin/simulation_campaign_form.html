@@ -84,6 +84,13 @@
                         <div class="col col-md-3"><label class="form-control-label">Authorized Scope</label></div>
                         <div class="col-12 col-md-9"><textarea name="authorized_scope" rows="3" class="form-control">{{ campaign.authorized_scope if campaign else '' }}</textarea></div>
                     </div>
+                    <div class="row form-group">
+                        <div class="col col-md-3"><label class="form-control-label">Authorization Statement</label></div>
+                        <div class="col-12 col-md-9">
+                            <textarea name="authorization_statement" rows="3" class="form-control" required>{{ campaign.authorization_statement if campaign else '' }}</textarea>
+                            <small class="form-text text-muted">Record who authorized this internal security awareness simulation and the approved purpose.</small>
+                        </div>
+                    </div>
                     <div class="card-footer" style="text-align: right;">
                         <a href="/simulations/campaigns" class="btn btn-secondary btn-sm">
                             <i class="fas fa-times"></i> Cancel

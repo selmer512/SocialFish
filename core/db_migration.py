@@ -34,9 +34,9 @@ def _seed_simulation_demo(cur):
         """
         INSERT INTO simulation_campaigns (
             slug, name, description, channel, status, authorized_scope,
-            started_at, created_at, updated_at
+            authorization_statement, started_at, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             SIMULATION_DEMO_SLUG,
@@ -45,6 +45,7 @@ def _seed_simulation_demo(cur):
             "email",
             "active",
             "Authorized internal training simulation only; no external delivery is configured.",
+            "I confirm this campaign is authorized for internal security awareness training by the Cybersecurity Team.",
             now,
             now,
             now,
@@ -540,6 +541,7 @@ def migrate_db(database_path):
             selected_channels TEXT NOT NULL DEFAULT '["email"]',
             status TEXT NOT NULL DEFAULT 'draft',
             authorized_scope TEXT,
+            authorization_statement TEXT,
             landing_url TEXT,
             training_url TEXT,
             start_date TIMESTAMP,
@@ -561,6 +563,7 @@ def migrate_db(database_path):
         "selected_channels": "TEXT NOT NULL DEFAULT '[\"email\"]'",
         "status": "TEXT NOT NULL DEFAULT 'draft'",
         "authorized_scope": "TEXT",
+        "authorization_statement": "TEXT",
         "landing_url": "TEXT",
         "training_url": "TEXT",
         "start_date": "TIMESTAMP",
@@ -571,6 +574,18 @@ def migrate_db(database_path):
         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     })
+    cur.execute(
+        """
+        UPDATE simulation_campaigns
+        SET authorization_statement = ?
+        WHERE slug = ?
+          AND (authorization_statement IS NULL OR TRIM(authorization_statement) = '')
+        """,
+        (
+            "I confirm this campaign is authorized for internal security awareness training by the Cybersecurity Team.",
+            SIMULATION_DEMO_SLUG,
+        ),
+    )
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS simulation_import_batches (

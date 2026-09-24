@@ -150,6 +150,7 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(new_campaign.status_code, 200)
         self.assertIn(b"Create Campaign", new_campaign.data)
         self.assertIn(b'name="selected_channels"', new_campaign.data)
+        self.assertIn(b'name="authorization_statement"', new_campaign.data)
         self.assertEqual(ai_settings.status_code, 200)
         self.assertIn(b"Secrets are accepted by the API but are never rendered back", ai_settings.data)
         self.assertIn(b"AI Provider Configuration", ai_settings.data)
@@ -846,6 +847,35 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn("delivery.preview", audit_actions)
         self.assertIn("delivery.start", audit_actions)
 
+    def test_delivery_start_blocks_campaign_without_authorization_statement(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            campaign = create_campaign(conn, "Route Readiness Block", selected_channels=["email"])
+            create_target(
+                conn,
+                campaign["id"],
+                name="Blocked Target",
+                email="blocked.target@example.test",
+                channel="email",
+            )
+        finally:
+            conn.close()
+
+        response = self.client.post(
+            "/simulations/campaigns/{}/deliveries/start".format(campaign["id"]),
+            json={"mode": "dry_run", "max_retries": 0},
+        )
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"]["type"], "delivery_readiness_failed")
+        self.assertFalse(payload["error"]["readiness"]["ready"])
+        failed_keys = {
+            check["key"]
+            for check in payload["error"]["readiness"]["failed_checks"]
+        }
+        self.assertIn("authorization_statement", failed_keys)
+
     def test_delivery_routes_return_structured_errors(self):
         missing_status = self.client.get("/api/simulations/deliveries/999999")
         missing_payload = missing_status.get_json()
@@ -875,30 +905,11 @@ class SimulationRoutesTest(unittest.TestCase):
             },
         )
         payload = response.get_json()
-        job_id = payload["delivery"]["job"]["id"]
-        email_attempts = [
-            attempt for attempt in payload["delivery"]["attempts"]
-            if attempt["channel"] == "email"
-        ]
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["delivery"]["job"]["status"], "completed_with_errors")
-        self.assertEqual(payload["delivery"]["job"]["failed_count"], 2)
-        self.assertTrue(all(attempt["status"] == "failed" for attempt in email_attempts))
-        self.assertTrue(all("disabled" in attempt["error_message"] for attempt in email_attempts))
-        self.assertTrue(all(attempt["provider_response"] == {} for attempt in email_attempts))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"]["type"], "delivery_readiness_failed")
+        self.assertIn("Enable the SMTP Email provider", payload["error"]["message"])
         self.assertNotIn("route-pass", str(payload))
-
-        api_response = self.client.get("/api/simulations/deliveries/{}".format(job_id))
-        api_payload = api_response.get_json()
-        self.assertEqual(api_response.status_code, 200)
-        self.assertEqual(api_payload["delivery"]["job"]["status"], "completed_with_errors")
-        self.assertIn("disabled", str(api_payload["delivery"]["attempts"]))
-
-        page_response = self.client.get("/simulations/deliveries/{}".format(job_id))
-        self.assertEqual(page_response.status_code, 200)
-        self.assertIn(b"failed", page_response.data)
-        self.assertIn(b"disabled", page_response.data)
 
     def test_delivery_start_with_incomplete_enabled_provider_reports_configuration_error(self):
         campaign_id = self._campaign_id()
@@ -921,17 +932,11 @@ class SimulationRoutesTest(unittest.TestCase):
             },
         )
         payload = response.get_json()
-        sms_attempt = next(
-            attempt for attempt in payload["delivery"]["attempts"]
-            if attempt["channel"] == "sms"
-        )
 
         self.assertEqual(settings_response.status_code, 200)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["delivery"]["job"]["status"], "completed_with_errors")
-        self.assertEqual(sms_attempt["status"], "failed")
-        self.assertIn("api_key", sms_attempt["error_message"])
-        self.assertEqual(sms_attempt["provider_response"], {})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"]["type"], "delivery_readiness_failed")
+        self.assertIn("Configure credentials for SMS API", payload["error"]["message"])
 
     def test_tracking_endpoints_record_open_link_and_attachment_events(self):
         campaign_id = self._campaign_id()
@@ -1374,6 +1379,7 @@ class SimulationRoutesTest(unittest.TestCase):
                 "start_date": "2026-10-01",
                 "end_date": "2026-10-31",
                 "authorized_scope": "Internal route test users only",
+                "authorization_statement": "Cybersecurity authorized this route-managed campaign for internal testing.",
             },
             follow_redirects=False,
         )
@@ -1456,6 +1462,7 @@ class SimulationRoutesTest(unittest.TestCase):
                 "start_date": "2026-11-01",
                 "end_date": "2026-11-30",
                 "authorized_scope": "Updated internal route test users only",
+                "authorization_statement": "Cybersecurity reauthorized this route-managed campaign for FY26.",
             },
             follow_redirects=False,
         )

@@ -548,6 +548,7 @@ def list_campaigns(conn, include_archived=False):
             c.selected_channels,
             c.status,
             c.authorized_scope,
+            c.authorization_statement,
             c.landing_url,
             c.training_url,
             c.start_date,
@@ -574,7 +575,7 @@ def get_campaign(conn, campaign_id):
             """
             SELECT
                 id, slug, name, description, objective, training_owner, channel,
-                selected_channels, status, authorized_scope, landing_url,
+                selected_channels, status, authorized_scope, authorization_statement, landing_url,
                 training_url, start_date, end_date, started_at, completed_at,
                 archived_at, created_at, updated_at
             FROM simulation_campaigns
@@ -599,6 +600,7 @@ def create_campaign(
     start_date=None,
     end_date=None,
     authorized_scope=None,
+    authorization_statement=None,
 ):
     """Create a campaign record and return the normalized row."""
     normalized_name = _normalize_text(name)
@@ -612,10 +614,10 @@ def create_campaign(
         """
         INSERT INTO simulation_campaigns (
             slug, name, description, objective, training_owner, channel,
-            selected_channels, status, authorized_scope, landing_url,
+            selected_channels, status, authorized_scope, authorization_statement, landing_url,
             training_url, start_date, end_date, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             _unique_campaign_slug(conn, normalized_name),
@@ -627,6 +629,7 @@ def create_campaign(
             json.dumps(channels),
             _normalize_status(status),
             _normalize_text(authorized_scope),
+            _normalize_text(authorization_statement),
             _normalize_text(landing_url),
             _normalize_text(training_url),
             _normalize_text(start_date),
@@ -660,6 +663,9 @@ def update_campaign(conn, campaign_id, **fields):
         "selected_channels": json.dumps(channels),
         "status": _normalize_status(fields.get("status", existing.get("status"))),
         "authorized_scope": _normalize_text(fields.get("authorized_scope", existing.get("authorized_scope"))),
+        "authorization_statement": _normalize_text(
+            fields.get("authorization_statement", existing.get("authorization_statement"))
+        ),
         "landing_url": _normalize_text(fields.get("landing_url", existing.get("landing_url"))),
         "training_url": _normalize_text(fields.get("training_url", existing.get("training_url"))),
         "start_date": _normalize_text(fields.get("start_date", existing.get("start_date"))),
@@ -673,7 +679,7 @@ def update_campaign(conn, campaign_id, **fields):
         SET
             slug = ?, name = ?, description = ?, objective = ?,
             training_owner = ?, channel = ?, selected_channels = ?,
-            status = ?, authorized_scope = ?, landing_url = ?,
+            status = ?, authorized_scope = ?, authorization_statement = ?, landing_url = ?,
             training_url = ?, start_date = ?, end_date = ?, updated_at = ?
         WHERE id = ?
         """,
@@ -687,6 +693,7 @@ def update_campaign(conn, campaign_id, **fields):
             updated["selected_channels"],
             updated["status"],
             updated["authorized_scope"],
+            updated["authorization_statement"],
             updated["landing_url"],
             updated["training_url"],
             updated["start_date"],
@@ -1962,6 +1969,93 @@ def build_delivery_preview(conn, campaign_id, provider_ids=None, mode="dry_run")
     }
 
 
+def _provider_readiness(provider, mode):
+    messages = []
+    ready = True
+    if not provider.get("enabled"):
+        ready = False
+        messages.append("Enable the {} provider for {} delivery.".format(provider["provider_name"], provider["channel"]))
+    if mode == "dry_run":
+        if provider.get("provider_type") != "dry_run":
+            ready = False
+            messages.append("Select the dry-run {} provider for dry-run delivery.".format(provider["channel"]))
+        return {"ready": ready, "messages": messages}
+
+    required = list(provider.get("required_settings") or [])
+    settings = provider.get("settings") or {}
+    missing = [
+        key for key in required
+        if key not in {"api_key", "secret", "token", "password", "webhook_secret"}
+        and _normalize_text(settings.get(key)) is None
+    ]
+    if missing:
+        ready = False
+        messages.append(
+            "{} is missing required settings: {}.".format(
+                provider["provider_name"],
+                ", ".join(missing),
+            )
+        )
+    needs_secret = any(key in {"api_key", "secret", "token", "password"} for key in required)
+    if needs_secret and not provider.get("secret_configured"):
+        ready = False
+        messages.append("Configure credentials for {} before provider delivery.".format(provider["provider_name"]))
+    return {"ready": ready, "messages": messages}
+
+
+def check_campaign_delivery_readiness(conn, campaign_id, provider_ids=None, mode="dry_run"):
+    """Return launch-readiness checks for a campaign delivery request."""
+    preview = build_delivery_preview(conn, campaign_id, provider_ids=provider_ids, mode=mode)
+    campaign = preview["campaign"]
+    checks = []
+
+    def add_check(key, ready, message, action):
+        checks.append({
+            "key": key,
+            "ready": bool(ready),
+            "message": message,
+            "action": action,
+        })
+
+    add_check(
+        "authorization_statement",
+        bool(_normalize_text(campaign.get("authorization_statement"))),
+        "Campaign authorization statement is recorded.",
+        "Add the required authorization statement to the campaign metadata.",
+    )
+    add_check(
+        "target_count",
+        preview["total_targets"] > 0,
+        "{} active targets are ready for delivery.".format(preview["total_targets"]),
+        "Add at least one active target with valid contact details.",
+    )
+
+    for channel in sorted(preview["providers"].keys()):
+        message = preview["messages"].get(channel) or {}
+        add_check(
+            "channel_content.{}".format(channel),
+            bool(_normalize_text(message.get("body"))),
+            "{} content is available for delivery.".format(channel.upper()),
+            "Generate or save campaign content for {} before delivery.".format(channel.upper()),
+        )
+        provider = preview["providers"][channel]
+        provider_ready = _provider_readiness(provider, preview["mode"])
+        add_check(
+            "provider.{}".format(channel),
+            provider_ready["ready"],
+            "{} provider is ready for {} mode.".format(provider["provider_name"], preview["mode"]),
+            " ".join(provider_ready["messages"]) or "Review provider settings.",
+        )
+
+    failed = [check for check in checks if not check["ready"]]
+    return {
+        "ready": not failed,
+        "checks": checks,
+        "failed_checks": failed,
+        "preview": preview,
+    }
+
+
 def _create_message_artifacts(conn, campaign_id, job_id, messages):
     artifacts = {}
     now = _utc_now()
@@ -2073,9 +2167,11 @@ def create_delivery_job_from_campaign(
     max_retries=0,
 ):
     """Create a delivery job, artifacts, tracking tokens, and per-target attempts."""
-    preview = build_delivery_preview(conn, campaign_id, provider_ids=provider_ids, mode=mode)
-    if not preview["targets"]:
-        raise ValueError("Campaign has no active targets to deliver.")
+    readiness = check_campaign_delivery_readiness(conn, campaign_id, provider_ids=provider_ids, mode=mode)
+    preview = readiness["preview"]
+    if not readiness["ready"]:
+        actions = [check["action"] for check in readiness["failed_checks"]]
+        raise ValueError("Campaign is not ready for delivery: {}".format(" ".join(actions)))
 
     now = _utc_now()
     provider_snapshot = {
