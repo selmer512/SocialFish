@@ -25,11 +25,17 @@ This phase consolidates the modernization into a maintainable release candidate.
   - Added `tests/test_simulation_utils.py` to lock the shared helper behavior.
   - Verified with `python -m py_compile SocialFish.py core\simulation_utils.py core\simulation_service.py core\audit_service.py core\delivery_adapters.py core\directory_connectors.py core\ai_generation.py` and `python -m unittest discover tests`.
 
-- [ ] Update dependency documentation and configuration:
+- [x] Update dependency documentation and configuration:
   - Review `requirements.txt`, `Dockerfile`, `docker-compose.yml`, setup instructions, and imports introduced by the modernization work
   - Add only necessary dependencies and pin versions where the existing project already pins comparable packages
   - Document every newly required dependency in `docs/reference/dependencies.md` with YAML front matter using type `reference`, tags for `dependencies` and `operations`
   - Include wiki-links to feature docs that rely on each dependency
+
+  Completion notes:
+  - Added `docs/reference/dependencies.md` with structured front matter, dependency-to-feature mapping, and wiki-links for simulation, AI, delivery, metrics, directory, and audit docs.
+  - Aligned `requirements.txt` and `setup.py` by removing stale unused entries (`pydantic`, `python-dotenv`, `cryptography`) and the duplicate `Flask-SocketIO` line while preserving runtime/browser/tunnel dependencies used by current imports.
+  - Updated `Dockerfile` to Python 3.12 and direct `requirements.txt` installation so `datetime.UTC` imports in modernization modules work in containers.
+  - Removed the obsolete Compose `version` field while preserving the existing service, port, logging, and startup command.
 
 - [ ] Create a structured feature index:
   - Create `docs/features/simulation-platform-index.md` with YAML front matter using type `reference`, tags for `simulations`, `ai`, `metrics`, and `operations`

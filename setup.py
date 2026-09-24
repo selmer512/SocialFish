@@ -33,23 +33,31 @@ def install_dependencies():
     logger.info("\n[*] Installing dependencies...")
     
     deps = [
-        'flask==2.3.3',
-        'flask-socketio>=5.3.0',
-        'eventlet>=0.33.3',
-        'playwright>=1.40.0',
-        'pyngrok>=7.0.0',
-        'python-dotenv>=1.0.0',
-        'cryptography>=41.0.0',
-        'selenium>=4.13.0',
-        'webdriver-manager>=4.0.0'
+        ("requests", "requests"),
+        ("pylatex", "pylatex"),
+        ("python3-nmap", "nmap3"),
+        ("qrcode", "qrcode"),
+        ("Flask==3.1.3", "flask"),
+        ("colorama", "colorama"),
+        ("Flask-Login", "flask_login"),
+        ("python-nmap", "nmap"),
+        ("playwright>=1.40.0", "playwright"),
+        ("flask-socketio>=5.3.0", "flask_socketio"),
+        ("python-socketio>=5.9.0", "socketio"),
+        ("python-engineio>=4.7.0", "engineio"),
+        ("eventlet>=0.33.3", "eventlet"),
+        ("pyngrok>=7.0.0", "pyngrok"),
+        ("Werkzeug>=2.3.0", "werkzeug"),
+        ("selenium>=4.13.0", "selenium"),
+        ("webdriver-manager>=4.0.0", "webdriver_manager"),
     ]
     
-    for dep in deps:
+    for dep, import_name in deps:
         try:
-            __import__(dep.split('>=')[0].split('==')[0].replace('-', '_'))
-            logger.info(f"[+] {dep.split('>=')[0]} already installed")
+            __import__(import_name)
+            logger.info("[+] %s already installed", dep.split('>=')[0].split('==')[0])
         except ImportError:
-            logger.info(f"[*] Installing {dep}...")
+            logger.info("[*] Installing %s...", dep)
             subprocess.run([sys.executable, '-m', 'pip', 'install', dep], check=True)
     
     logger.info("[+] All dependencies installed ✓")
