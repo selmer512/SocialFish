@@ -27,11 +27,16 @@ This phase strengthens the modernization work with auditability, explicit author
   - Added recursive audit metadata redaction for plaintext secret-bearing keys while preserving safe placeholder/reference fields.
   - Added `tests/test_audit_service.py` coverage plus migration schema assertions in `tests/test_simulation_migration.py`.
 
-- [ ] Instrument high-value workflows with audit events:
+- [x] Instrument high-value workflows with audit events:
   - Campaign create, update, archive, delivery preview, and delivery start
   - Target manual create, CSV import, archive, directory preview, and directory sync
   - AI provider configuration, AI generation, draft save, and provider test
   - Metrics/report export and report view generation
+
+  Completion notes:
+  - Added route-level administrative audit events for campaign create/update/archive, target create/update/archive, CSV import, delivery preview/start, AI provider configuration, AI generation, AI draft save, directory provider create/update/test, directory preview/sync, metrics CSV export, events JSON export, and report views.
+  - Centralized actor, IP address, user-agent, channel, and metadata capture through `_audit_context` in `SocialFish.py`, reusing `core/audit_service.py` helpers so metadata redaction continues to strip plaintext secret-shaped fields.
+  - Expanded `tests/test_simulation_routes.py` assertions to verify the expected administrative audit action names and redacted secret metadata for key workflows.
 
 - [ ] Add operator-facing audit UI:
   - Create an Audit Log page under the authenticated admin UI

@@ -14,6 +14,15 @@ from core.cleanFake import cleanFake
 from core.genReport import genReport
 from core.report import generate_unique
 from core.db_migration import migrate_db
+from core.audit_service import (
+    record_ai_provider_audit,
+    record_campaign_audit,
+    record_delivery_audit,
+    record_directory_sync_audit,
+    record_export_audit,
+    record_generation_audit,
+    record_target_audit,
+)
 from core.simulation_service import (
     TARGET_CSV_COLUMNS,
     archive_campaign,
@@ -627,6 +636,16 @@ def _directory_requested_by():
         return str(user_id)
     return "authenticated-admin"
 
+
+def _audit_context(metadata=None, channel=None):
+    return {
+        "actor_identity": _directory_requested_by(),
+        "channel": channel,
+        "ip_address": request.remote_addr,
+        "user_agent": request.headers.get("User-Agent"),
+        "metadata": metadata or {},
+    }
+
 # Conta o numero de credenciais salvas no banco
 def countCreds():
     count = 0
@@ -933,7 +952,21 @@ def new_simulation_campaign():
 @flask_login.login_required
 def create_simulation_campaign():
     try:
-        campaign = create_campaign(g.db, **_campaign_payload())
+        payload = _campaign_payload()
+        campaign = create_campaign(g.db, **payload)
+        record_campaign_audit(
+            g.db,
+            "campaign.create",
+            campaign["id"],
+            **_audit_context(
+                metadata={
+                    "name": campaign["name"],
+                    "status": campaign["status"],
+                    "selected_channels": campaign["selected_channels"],
+                    "authorized_scope_present": bool(campaign.get("authorized_scope")),
+                }
+            ),
+        )
         flash("Campaign created for authorized internal training.", "success")
         return redirect("/simulations/campaigns/{}".format(campaign["id"]))
     except (TypeError, ValueError) as e:
@@ -991,6 +1024,24 @@ def preview_simulation_delivery(campaign_id):
             provider_ids=payload["provider_ids"],
             mode=payload["mode"],
         )
+        record_delivery_audit(
+            g.db,
+            "delivery.preview",
+            None,
+            campaign_id=campaign_id,
+            **_audit_context(
+                channel=",".join(sorted(preview["providers"].keys())),
+                metadata={
+                    "mode": preview["mode"],
+                    "total_targets": preview["total_targets"],
+                    "total_attempts": preview["total_attempts"],
+                    "provider_ids": {
+                        channel: provider.get("id")
+                        for channel, provider in preview["providers"].items()
+                    },
+                }
+            ),
+        )
         return jsonify({"status": "ok", "preview": preview})
     except (TypeError, ValueError) as e:
         return _json_error("delivery_preview_error", str(e), 400)
@@ -1010,6 +1061,23 @@ def start_simulation_delivery(campaign_id):
             max_retries=payload["max_retries"],
         )
         status = run_delivery_job(g.db, created["job"]["id"])
+        record_delivery_audit(
+            g.db,
+            "delivery.start",
+            status["job"]["id"],
+            campaign_id=campaign_id,
+            **_audit_context(
+                channel=",".join(sorted(status["job"].get("provider_snapshot", {}).keys())),
+                metadata={
+                    "mode": status["job"]["mode"],
+                    "status": status["job"]["status"],
+                    "total_attempts": status["job"]["total_attempts"],
+                    "delivered_count": status["job"]["delivered_count"],
+                    "failed_count": status["job"]["failed_count"],
+                    "max_retries": payload["max_retries"],
+                }
+            ),
+        )
         if request.is_json:
             return jsonify({"status": "ok", "delivery": status})
         flash("Delivery job #{} started in {} mode.".format(status["job"]["id"], status["job"]["mode"]), "success")
@@ -1110,6 +1178,19 @@ def simulation_provider_webhook(channel, provider_key):
 def update_simulation_campaign(campaign_id):
     try:
         campaign = update_campaign(g.db, campaign_id, **_campaign_payload())
+        record_campaign_audit(
+            g.db,
+            "campaign.update",
+            campaign["id"],
+            **_audit_context(
+                metadata={
+                    "name": campaign["name"],
+                    "status": campaign["status"],
+                    "selected_channels": campaign["selected_channels"],
+                    "authorized_scope_present": bool(campaign.get("authorized_scope")),
+                }
+            ),
+        )
         flash("Campaign metadata updated.", "success")
         return redirect("/simulations/campaigns/{}".format(campaign["id"]))
     except (TypeError, ValueError) as e:
@@ -1121,7 +1202,13 @@ def update_simulation_campaign(campaign_id):
 @flask_login.login_required
 def archive_simulation_campaign(campaign_id):
     try:
-        archive_campaign(g.db, campaign_id)
+        campaign = archive_campaign(g.db, campaign_id)
+        record_campaign_audit(
+            g.db,
+            "campaign.archive",
+            campaign_id,
+            **_audit_context(metadata={"name": campaign["name"], "status": campaign["status"]}),
+        )
         flash("Campaign archived. Historical metrics were preserved.", "success")
     except ValueError as e:
         flash(str(e), "danger")
@@ -1151,6 +1238,20 @@ def simulation_targets_sample_csv():
 def create_simulation_target(campaign_id):
     try:
         target = create_target(g.db, campaign_id, **_target_payload())
+        record_target_audit(
+            g.db,
+            "target.create",
+            target["id"],
+            campaign_id=campaign_id,
+            **_audit_context(
+                channel=target.get("channel"),
+                metadata={
+                    "source": target.get("source"),
+                    "department": target.get("department"),
+                    "active": target.get("active"),
+                },
+            ),
+        )
         flash("Target {} added to the campaign.".format(target["display_name"] or target["name"]), "success")
     except (TypeError, ValueError) as e:
         flash(str(e), "danger")
@@ -1173,6 +1274,22 @@ def upload_simulation_targets(campaign_id):
             original_filename=upload.filename,
         )
         imported_count = len(result["targets"])
+        record_target_audit(
+            g.db,
+            "target.csv_import",
+            "batch:{}".format(result["batch"]["id"]),
+            campaign_id=campaign_id,
+            **_audit_context(
+                metadata={
+                    "original_filename": result["batch"].get("original_filename"),
+                    "total_rows": result["batch"].get("total_rows"),
+                    "valid_rows": result["batch"].get("valid_rows"),
+                    "invalid_rows": result["batch"].get("invalid_rows"),
+                    "imported_rows": imported_count,
+                    "error_count": len(result["errors"]),
+                }
+            ),
+        )
         if result["errors"]:
             flash(
                 "Imported {} target(s) with {} validation error(s).".format(imported_count, len(result["errors"])),
@@ -1192,6 +1309,16 @@ def upload_simulation_targets(campaign_id):
 def update_simulation_target(target_id):
     try:
         target = update_target(g.db, target_id, **_target_payload())
+        record_target_audit(
+            g.db,
+            "target.update",
+            target["id"],
+            campaign_id=target["campaign_id"],
+            **_audit_context(
+                channel=target.get("channel"),
+                metadata={"source": target.get("source"), "active": target.get("active")},
+            ),
+        )
         flash("Target {} updated.".format(target["display_name"] or target["name"]), "success")
         return redirect("/simulations/campaigns/{}".format(target["campaign_id"]))
     except (TypeError, ValueError) as e:
@@ -1204,6 +1331,16 @@ def update_simulation_target(target_id):
 def archive_simulation_target(target_id):
     try:
         target = archive_target(g.db, target_id)
+        record_target_audit(
+            g.db,
+            "target.archive",
+            target["id"],
+            campaign_id=target["campaign_id"],
+            **_audit_context(
+                channel=target.get("channel"),
+                metadata={"source": target.get("source"), "active": target.get("active")},
+            ),
+        )
         flash("Target archived. Historical events were preserved.", "success")
         return redirect("/simulations/campaigns/{}".format(target["campaign_id"]))
     except ValueError as e:
@@ -1259,6 +1396,19 @@ def simulation_campaign_target_metrics_csv(campaign_id):
         detail = get_campaign_detail(g.db, campaign_id)
         filters = _simulation_metric_filters()
         targets = get_target_metrics(g.db, campaign_id, filters)
+        record_export_audit(
+            g.db,
+            "export.metrics",
+            "target-metrics-csv",
+            campaign_id=campaign_id,
+            **_audit_context(
+                metadata={
+                    "format": "csv",
+                    "target_count": len(targets),
+                    "filters": get_campaign_metrics(g.db, campaign_id, filters)["filters"],
+                }
+            ),
+        )
         return _target_metrics_csv_response(detail["campaign"], targets, get_campaign_metrics(g.db, campaign_id, filters)["filters"])
     except (TypeError, ValueError) as e:
         return Response(str(e), status=400, mimetype="text/plain")
@@ -1270,6 +1420,22 @@ def simulation_campaign_events_json(campaign_id):
     try:
         detail = get_campaign_detail(g.db, campaign_id)
         events = [_safe_event_export(event) for event in detail["reporting"]["events"]]
+        record_export_audit(
+            g.db,
+            "export.events",
+            "campaign-events-json",
+            campaign_id=campaign_id,
+            **_audit_context(
+                metadata={
+                    "format": "json",
+                    "event_count": len(events),
+                    "redaction": {
+                        "provider_secrets": "omitted",
+                        "sensitive_metadata_fields": "redacted",
+                    },
+                }
+            ),
+        )
         payload = {
             "status": "ok",
             "campaign": {
@@ -1302,6 +1468,13 @@ def simulation_campaign_print_report(campaign_id):
         detail = get_campaign_detail(g.db, campaign_id)
         filters = _simulation_metric_filters()
         metrics = get_campaign_metrics(g.db, campaign_id, filters)
+        record_export_audit(
+            g.db,
+            "report.view",
+            "campaign-report",
+            campaign_id=campaign_id,
+            **_audit_context(metadata={"filters": metrics["filters"]}),
+        )
         return render_template(
             'admin/simulation_campaign_report.html',
             campaign=detail["campaign"],
@@ -1369,9 +1542,25 @@ def ai_generate_api():
         if not payload["provider_id"]:
             return _json_error("missing_provider_configuration", "Choose an enabled AI provider before generating drafts.")
         response = generate_ai_scenario(g.db, payload["provider_id"], payload["request"])
+        generation = ai_generation_response_payload(response)
+        audit_id = record_generation_audit(
+            g.db,
+            "generation.create",
+            "provider:{}".format(payload["provider_id"]),
+            campaign_id=payload["request"].campaign_context.get("campaign_id"),
+            **_audit_context(
+                metadata={
+                    "provider_id": payload["provider_id"],
+                    "channels": generation["channels"],
+                    "risk_flags": generation["risk_flags"],
+                    "safety_notes": generation["safety_notes"],
+                }
+            ),
+        )
+        generation["administrative_audit_event_id"] = audit_id
         return jsonify({
             "status": "ok",
-            "generation": ai_generation_response_payload(response),
+            "generation": generation,
         })
     except (AIDisabledProviderError, AIProviderConfigurationError, AIProviderTypeError, ValueError) as e:
         return _json_error("missing_provider_configuration", str(e), 400)
@@ -1400,6 +1589,22 @@ def ai_save_draft_api():
             metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
             audit_id=_optional_int(data.get("audit_id")),
             status=data.get("status") or "approved",
+        )
+        record_generation_audit(
+            g.db,
+            "generation.draft_save",
+            draft["id"],
+            campaign_id=draft["campaign_id"],
+            **_audit_context(
+                metadata={
+                    "provider_id": draft.get("provider_id"),
+                    "provider_type": draft.get("provider_type"),
+                    "channels": draft.get("channels"),
+                    "status": draft.get("status"),
+                    "risk_flags": draft.get("risk_flags"),
+                    "safety_notes": draft.get("safety_notes"),
+                }
+            ),
         )
         return jsonify({"status": "ok", "draft": draft})
     except (TypeError, ValueError) as e:
@@ -1433,6 +1638,21 @@ def ai_settings_api():
             enabled=_form_bool(data.get('enabled')),
             secret=data.get('secret') or data.get('api_key'),
             description=data.get('description'),
+        )
+        record_ai_provider_audit(
+            g.db,
+            "ai_provider.configure",
+            provider["id"],
+            **_audit_context(
+                metadata={
+                    "name": provider.get("name"),
+                    "provider_type": provider.get("provider_type"),
+                    "model_name": provider.get("model_name"),
+                    "enabled": provider.get("enabled"),
+                    "secret_configured": provider.get("secret_configured"),
+                    "request": data,
+                }
+            ),
         )
         return jsonify({'status': 'ok', 'provider': provider})
     except (TypeError, ValueError) as e:
@@ -1485,8 +1705,26 @@ def directory_provider_settings_api():
     try:
         if provider_id is None:
             provider = create_directory_provider_settings(g.db, **payload)
+            action_type = "directory_provider.create"
         else:
             provider = update_directory_provider_settings(g.db, provider_id, **payload)
+            action_type = "directory_provider.update"
+        record_directory_sync_audit(
+            g.db,
+            action_type,
+            "provider:{}".format(provider["id"]),
+            **_audit_context(
+                metadata={
+                    "provider_id": provider["id"],
+                    "provider_type": provider.get("provider_type"),
+                    "enabled": provider.get("enabled"),
+                    "consent_status": provider.get("consent_status"),
+                    "selected_groups": provider.get("selected_groups"),
+                    "secret_configured": provider.get("secret_configured"),
+                    "request": payload,
+                }
+            ),
+        )
         return jsonify({"status": "ok", "provider": provider})
     except (TypeError, ValueError) as e:
         return _json_error("directory_provider_settings", str(e), 400)
@@ -1500,6 +1738,19 @@ def directory_provider_test_api(provider_id):
         return _json_error("directory_provider_not_found", "Unknown directory provider config id: {}".format(provider_id), 404)
     try:
         groups = list_directory_groups(g.db, provider_id)
+        record_directory_sync_audit(
+            g.db,
+            "directory_provider.test",
+            "provider:{}".format(provider_id),
+            **_audit_context(
+                metadata={
+                    "provider_id": provider_id,
+                    "provider_type": provider.get("provider_type"),
+                    "group_count": len(groups),
+                    "mock": provider.get("provider_type") == "mock_entra",
+                }
+            ),
+        )
         return jsonify({
             "status": "ok",
             "provider": provider,
@@ -1539,6 +1790,19 @@ def directory_provider_preview_api(provider_id):
             group_ids=payload["group_ids"],
             requested_by=_directory_requested_by(),
         )
+        record_directory_sync_audit(
+            g.db,
+            "directory_sync.preview",
+            result["job"]["id"],
+            **_audit_context(
+                metadata={
+                    "provider_id": provider_id,
+                    "selected_groups": result["job"].get("selected_groups"),
+                    "staged_count": result["job"].get("staged_count"),
+                    "invalid_count": result["job"].get("invalid_count"),
+                }
+            ),
+        )
         return jsonify({"status": "ok", "sync_job": result})
     except DirectoryConnectorError as e:
         return _directory_connector_error_response(e)
@@ -1559,6 +1823,23 @@ def directory_provider_sync_api(provider_id):
             group_ids=payload["group_ids"],
             campaign_id=payload["campaign_id"],
             requested_by=_directory_requested_by(),
+        )
+        record_directory_sync_audit(
+            g.db,
+            "directory_sync.sync",
+            result["job"]["id"],
+            campaign_id=payload["campaign_id"],
+            **_audit_context(
+                metadata={
+                    "provider_id": provider_id,
+                    "requested_campaign_id": payload["campaign_id"],
+                    "selected_groups": result["job"].get("selected_groups"),
+                    "imported_count": result["job"].get("imported_count"),
+                    "skipped_count": result["job"].get("skipped_count"),
+                    "duplicate_count": result["job"].get("duplicate_count"),
+                    "invalid_count": result["job"].get("invalid_count"),
+                }
+            ),
         )
         return jsonify({"status": "ok", "sync_job": result})
     except DirectoryConnectorError as e:

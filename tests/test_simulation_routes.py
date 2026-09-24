@@ -83,6 +83,37 @@ class SimulationRoutesTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def _administrative_audit_events(self, campaign_id=None):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            params = []
+            where = ""
+            if campaign_id is not None:
+                where = "WHERE campaign_id = ?"
+                params.append(campaign_id)
+            rows = conn.execute(
+                """
+                SELECT action_type, entity_type, entity_id, campaign_id, channel, metadata_json
+                FROM administrative_audit_events
+                {}
+                ORDER BY id ASC
+                """.format(where),
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            {
+                "action_type": row[0],
+                "entity_type": row[1],
+                "entity_id": row[2],
+                "campaign_id": row[3],
+                "channel": row[4],
+                "metadata": json.loads(row[5] or "{}"),
+            }
+            for row in rows
+        ]
+
     def test_authenticated_pages_render(self):
         simulations = self.client.get("/simulations")
         metrics_dashboard = self.client.get("/simulations/metrics")
@@ -235,6 +266,10 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"/simulations/ai-builder?campaign_id=", detail_response.data)
         self.assertIn(b"/ai-settings", detail_response.data)
 
+        audit_actions = [event["action_type"] for event in self._administrative_audit_events(campaign_id)]
+        self.assertIn("generation.create", audit_actions)
+        self.assertEqual(audit_actions.count("generation.draft_save"), 2)
+
     def test_ai_generation_api_covers_channels_and_redacts_secrets(self):
         campaign_id = self._campaign_id()
         provider_id = self._provider_id("local")
@@ -283,6 +318,12 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn("credential_collection_disallowed", payload["generation"]["risk_flags"])
         self.assertNotIn(secret, str(payload))
         self.assertNotIn("secret_placeholder", str(payload))
+
+        audit_events = self._administrative_audit_events()
+        provider_events = [event for event in audit_events if event["action_type"] == "ai_provider.configure"]
+        self.assertEqual(len(provider_events), 1)
+        self.assertEqual(provider_events[0]["entity_type"], "ai_provider")
+        self.assertEqual(provider_events[0]["metadata"]["request"]["secret"], "[redacted]")
 
     def test_ai_generation_api_returns_structured_errors(self):
         missing_provider = self.client.post(
@@ -605,6 +646,11 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Target Metrics", report_response.data)
         self.assertIn(b"Event Sources", report_response.data)
 
+        audit_actions = [event["action_type"] for event in self._administrative_audit_events(campaign["id"])]
+        self.assertIn("export.metrics", audit_actions)
+        self.assertIn("export.events", audit_actions)
+        self.assertIn("report.view", audit_actions)
+
     def test_campaign_reporting_views_render_empty_campaign_state(self):
         conn = sqlite3.connect(self.db_path)
         try:
@@ -715,6 +761,10 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn("Delivery #{}".format(job_id).encode("utf-8"), detail_response.data)
         self.assertIn(b"delivered", detail_response.data)
         self.assertIn(b"Latest Event", detail_response.data)
+
+        audit_actions = [event["action_type"] for event in self._administrative_audit_events(campaign_id)]
+        self.assertIn("delivery.preview", audit_actions)
+        self.assertIn("delivery.start", audit_actions)
 
     def test_delivery_routes_return_structured_errors(self):
         missing_status = self.client.get("/api/simulations/deliveries/999999")
@@ -1053,6 +1103,14 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(updated["provider"]["selected_groups"], ["group-engineering"])
         self.assertTrue(updated["provider"]["secret_configured"])
 
+        admin_events = self._administrative_audit_events()
+        admin_actions = [event["action_type"] for event in admin_events]
+        self.assertIn("directory_provider.create", admin_actions)
+        self.assertIn("directory_provider.test", admin_actions)
+        self.assertIn("directory_provider.update", admin_actions)
+        create_events = [event for event in admin_events if event["action_type"] == "directory_provider.create"]
+        self.assertEqual(create_events[0]["metadata"]["request"]["secret"], "[redacted]")
+
     def test_directory_graph_route_fails_safely_with_actionable_error(self):
         create_response = self.client.post(
             "/api/integrations/directory/providers",
@@ -1216,6 +1274,11 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertTrue(all("group-engineering" in row[5] for row in imported))
         self.assertEqual(audit_count, 6)
 
+        admin_actions = [event["action_type"] for event in self._administrative_audit_events()]
+        self.assertIn("directory_provider.create", admin_actions)
+        self.assertIn("directory_sync.preview", admin_actions)
+        self.assertIn("directory_sync.sync", admin_actions)
+
     def test_campaign_management_routes_create_update_detail_and_archive(self):
         create_response = self.client.post(
             "/simulations/campaigns",
@@ -1355,6 +1418,9 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(archived_list_response.status_code, 200)
         self.assertNotIn(b"Route Managed Campaign FY26", archived_list_response.data)
 
+        audit_actions = [event["action_type"] for event in self._administrative_audit_events(campaign_id)]
+        self.assertEqual(audit_actions, ["campaign.create", "campaign.update", "campaign.archive"])
+
     def test_campaign_create_route_displays_validation_errors(self):
         response = self.client.post(
             "/simulations/campaigns",
@@ -1458,6 +1524,11 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(archived[1], 0)
         self.assertIsNotNone(archived[2])
 
+        audit_actions = [event["action_type"] for event in self._administrative_audit_events(campaign_id)]
+        self.assertIn("target.create", audit_actions)
+        self.assertIn("target.update", audit_actions)
+        self.assertIn("target.archive", audit_actions)
+
     def test_target_create_route_displays_validation_errors(self):
         response = self.client.post(
             "/simulations/campaigns/{}/targets".format(self._campaign_id()),
@@ -1520,6 +1591,12 @@ class SimulationRoutesTest(unittest.TestCase):
             conn.close()
         self.assertEqual(batch, ("route-targets.csv", 3, 2, 1, 2))
         self.assertEqual(imported, 2)
+
+        audit_events = self._administrative_audit_events(campaign_id)
+        csv_events = [event for event in audit_events if event["action_type"] == "target.csv_import"]
+        self.assertEqual(len(csv_events), 1)
+        self.assertEqual(csv_events[0]["metadata"]["original_filename"], "route-targets.csv")
+        self.assertEqual(csv_events[0]["metadata"]["imported_rows"], 2)
 
     def test_target_csv_upload_reports_duplicate_contacts(self):
         campaign_id = self._campaign_id()
