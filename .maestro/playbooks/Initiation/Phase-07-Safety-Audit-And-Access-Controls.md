@@ -38,11 +38,17 @@ This phase strengthens the modernization work with auditability, explicit author
   - Centralized actor, IP address, user-agent, channel, and metadata capture through `_audit_context` in `SocialFish.py`, reusing `core/audit_service.py` helpers so metadata redaction continues to strip plaintext secret-shaped fields.
   - Expanded `tests/test_simulation_routes.py` assertions to verify the expected administrative audit action names and redacted secret metadata for key workflows.
 
-- [ ] Add operator-facing audit UI:
+- [x] Add operator-facing audit UI:
   - Create an Audit Log page under the authenticated admin UI
   - Add filters for action type, entity type, channel, actor, date range, and campaign
   - Add detail views for structured metadata with sensitive values redacted
   - Add navigation from campaign detail pages to related audit events
+
+  Completion notes:
+  - Added authenticated `/audit-log` and `/audit-log/<event_id>` admin views backed by audit-service query helpers.
+  - Added filters for action type, entity type, channel, actor, campaign, and date range, plus detail rendering for structured redacted metadata.
+  - Added campaign detail navigation to `/audit-log?campaign_id=...` so operators can review related administrative events from a campaign.
+  - Added service and route tests covering audit filters, detail lookup, login protection behavior, campaign links, and redacted secret display.
 
 - [ ] Add authorized-use safety controls:
   - Add a required campaign authorization statement field for new campaigns

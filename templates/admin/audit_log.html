@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>SocialFish Audit Log</title>
+    <link href="/css/font-face.css" rel="stylesheet" media="all">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.1/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqiyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+    <link href="/vendor/bootstrap-4.1/bootstrap.min.css" rel="stylesheet" media="all">
+    <link href="/css/theme.css" rel="stylesheet" media="all">
+</head>
+<body>
+    <br>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <a href="/simulations"><i class="fas fa-arrow-left"></i> <strong>SocialFish</strong></a>/Audit Log
+            </div>
+            <div class="card-body card-block">
+                <div class="alert alert-info" role="alert">
+                    <strong>Authorized internal training simulations only.</strong>
+                    Administrative actions are recorded with actor, request context, campaign linkage, and redacted metadata.
+                </div>
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }}" role="alert">{{ message }}</div>
+                {% endfor %}
+                {% endwith %}
+
+                <div class="row">
+                    <div class="col-md-8">
+                        <h3 class="title-5 m-b-35">Audit Log</h3>
+                        <p class="form-text text-muted">
+                            Review campaign, target, AI, delivery, export, and directory actions across authenticated operator workflows.
+                        </p>
+                    </div>
+                    <div class="col-md-4" style="text-align: right;">
+                        <a class="btn btn-outline-secondary btn-sm" href="/simulations/campaigns">
+                            <i class="fas fa-bullhorn"></i>&nbsp; Campaigns
+                        </a>
+                    </div>
+                </div>
+
+                <form action="/audit-log" method="GET" class="form-horizontal" style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 24px;">
+                    <h5 class="mb-3"><i class="fas fa-filter"></i> Filters</h5>
+                    <div class="row">
+                        <div class="col-md-4 form-group">
+                            <label class="form-control-label">Action Type</label>
+                            <select name="action_type" class="form-control">
+                                <option value="">All actions</option>
+                                {% for action_type in filter_options.action_types %}
+                                <option value="{{ action_type }}" {% if filters.action_type == action_type %}selected{% endif %}>{{ action_type }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4 form-group">
+                            <label class="form-control-label">Entity Type</label>
+                            <select name="entity_type" class="form-control">
+                                <option value="">All entities</option>
+                                {% for entity_type in filter_options.entity_types %}
+                                <option value="{{ entity_type }}" {% if filters.entity_type == entity_type %}selected{% endif %}>{{ entity_type }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4 form-group">
+                            <label class="form-control-label">Channel</label>
+                            <select name="channel" class="form-control">
+                                <option value="">All channels</option>
+                                {% for channel in filter_options.channels %}
+                                <option value="{{ channel }}" {% if filters.channel == channel %}selected{% endif %}>{{ channel|upper }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 form-group">
+                            <label class="form-control-label">Actor</label>
+                            <select name="actor" class="form-control">
+                                <option value="">All actors</option>
+                                {% for actor in filter_options.actors %}
+                                <option value="{{ actor }}" {% if filters.actor_identity == actor %}selected{% endif %}>{{ actor }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4 form-group">
+                            <label class="form-control-label">Campaign</label>
+                            <select name="campaign_id" class="form-control">
+                                <option value="">All campaigns</option>
+                                {% for campaign in campaigns %}
+                                <option value="{{ campaign.id }}" {% if filters.campaign_id == campaign.id %}selected{% endif %}>{{ campaign.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-2 form-group">
+                            <label class="form-control-label">Start Date</label>
+                            <input type="date" name="start_date" value="{{ filters.start_date or '' }}" class="form-control">
+                        </div>
+                        <div class="col-md-2 form-group">
+                            <label class="form-control-label">End Date</label>
+                            <input type="date" name="end_date" value="{{ filters.end_date or '' }}" class="form-control">
+                        </div>
+                    </div>
+                    <div style="text-align: right;">
+                        <a class="btn btn-outline-secondary btn-sm" href="/audit-log">
+                            <i class="fas fa-times"></i> Clear
+                        </a>
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="fas fa-search"></i> Apply
+                        </button>
+                    </div>
+                </form>
+
+                {% if selected_event %}
+                <h4 class="mb-3" id="event-detail">Audit Event Detail</h4>
+                <div style="border: 1px solid #e5e5e5; padding: 20px; margin-bottom: 24px;">
+                    <div class="row">
+                        <div class="col-md-3"><strong>#{{ selected_event.id }}</strong><br><small>Event ID</small></div>
+                        <div class="col-md-3"><strong>{{ selected_event.action_type }}</strong><br><small>Action</small></div>
+                        <div class="col-md-3"><strong>{{ selected_event.entity_type }}</strong><br><small>Entity</small></div>
+                        <div class="col-md-3"><strong>{{ selected_event.created_at }}</strong><br><small>Timestamp</small></div>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-3"><small class="form-text text-muted">Actor</small>{{ selected_event.actor_identity or "unknown" }}</div>
+                        <div class="col-md-3"><small class="form-text text-muted">Channel</small>{{ selected_event.channel or "n/a" }}</div>
+                        <div class="col-md-3"><small class="form-text text-muted">Campaign</small>{% if selected_event.campaign_id %}<a href="/simulations/campaigns/{{ selected_event.campaign_id }}">{{ selected_event.campaign_id }}</a>{% else %}n/a{% endif %}</div>
+                        <div class="col-md-3"><small class="form-text text-muted">Entity ID</small>{{ selected_event.entity_id or "n/a" }}</div>
+                    </div>
+                    <hr>
+                    <small class="form-text text-muted">IP address: {{ selected_event.ip_address or "not recorded" }}</small>
+                    <small class="form-text text-muted">User agent: {{ selected_event.user_agent or "not recorded" }}</small>
+                    <pre style="margin-top: 16px; padding: 16px; background: #f7f7f7; border: 1px solid #e5e5e5; white-space: pre-wrap;">{{ selected_event.metadata_pretty }}</pre>
+                </div>
+                {% endif %}
+
+                <h4 class="mb-3">Events</h4>
+                <div class="table-responsive table-responsive-data2">
+                    <table class="table table-data2">
+                        <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>Action</th>
+                                <th>Entity</th>
+                                <th>Actor</th>
+                                <th>Channel</th>
+                                <th>Campaign</th>
+                                <th>Metadata</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for event in events %}
+                            <tr class="tr-shadow" id="audit-event-{{ event.id }}">
+                                <td>{{ event.created_at }}</td>
+                                <td><span class="badge badge-info">{{ event.action_type }}</span></td>
+                                <td>
+                                    {{ event.entity_type }}
+                                    <br>
+                                    <small class="form-text text-muted">{{ event.entity_id or "n/a" }}</small>
+                                </td>
+                                <td>{{ event.actor_identity or "unknown" }}</td>
+                                <td>{{ event.channel or "n/a" }}</td>
+                                <td>
+                                    {% if event.campaign_id %}
+                                    <a href="/simulations/campaigns/{{ event.campaign_id }}">{{ event.campaign_id }}</a>
+                                    {% else %}
+                                    n/a
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if event.metadata %}
+                                    <code>{{ event.metadata }}</code>
+                                    {% else %}
+                                    No metadata
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a class="btn btn-secondary btn-sm" href="/audit-log/{{ event.id }}">
+                                        <i class="fas fa-eye"></i> Details
+                                    </a>
+                                </td>
+                            </tr>
+                            <tr class="spacer"></tr>
+                            {% else %}
+                            <tr><td colspan="8">No audit events match the current filters.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/vendor/jquery-3.2.1.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/popper.min.js"></script>
+    <script src="/vendor/bootstrap-4.1/bootstrap.min.js"></script>
+</body>
+</html>

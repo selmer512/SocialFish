@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 import json
 
 
@@ -52,6 +52,16 @@ def _safe_json_loads(value, fallback):
 
 def _safe_json_dumps(value):
     return json.dumps(value or {}, sort_keys=True)
+
+
+def _normalize_date_bound(value, end_of_day=False):
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+    parsed = datetime.strptime(normalized, "%Y-%m-%d")
+    if end_of_day:
+        parsed = datetime.combine(parsed.date(), time.max)
+    return parsed.isoformat(timespec="seconds")
 
 
 def _is_sensitive_key(key):
@@ -173,6 +183,8 @@ def list_audit_events(
     channel=None,
     actor_identity=None,
     campaign_id=None,
+    start_date=None,
+    end_date=None,
     limit=100,
 ):
     """Return administrative audit events with metadata already decoded."""
@@ -193,6 +205,12 @@ def list_audit_events(
     if campaign_id is not None:
         filters.append("campaign_id = ?")
         params.append(campaign_id)
+    if start_date is not None:
+        filters.append("created_at >= ?")
+        params.append(_normalize_date_bound(start_date))
+    if end_date is not None:
+        filters.append("created_at <= ?")
+        params.append(_normalize_date_bound(end_date, end_of_day=True))
     params.append(int(limit or 100))
     where = "WHERE {}".format(" AND ".join(filters)) if filters else ""
     cursor = conn.execute(
@@ -210,3 +228,42 @@ def list_audit_events(
     )
     columns = [description[0] for description in cursor.description]
     return [_audit_event_response(dict(zip(columns, row))) for row in cursor.fetchall()]
+
+
+def get_audit_event(conn, audit_event_id):
+    cursor = conn.execute(
+        """
+        SELECT
+            id, actor_identity, action_type, entity_type, entity_id,
+            campaign_id, channel, ip_address, user_agent, metadata_json,
+            created_at
+        FROM administrative_audit_events
+        WHERE id = ?
+        """,
+        (audit_event_id,),
+    )
+    columns = [description[0] for description in cursor.description]
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return _audit_event_response(dict(zip(columns, row)))
+
+
+def audit_filter_options(conn):
+    def distinct_values(column):
+        rows = conn.execute(
+            """
+            SELECT DISTINCT {column}
+            FROM administrative_audit_events
+            WHERE {column} IS NOT NULL AND TRIM({column}) != ''
+            ORDER BY {column} ASC
+            """.format(column=column)
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    return {
+        "action_types": distinct_values("action_type"),
+        "entity_types": distinct_values("entity_type"),
+        "channels": distinct_values("channel"),
+        "actors": distinct_values("actor_identity"),
+    }

@@ -121,6 +121,7 @@ class SimulationRoutesTest(unittest.TestCase):
         new_campaign = self.client.get("/simulations/campaigns/new")
         ai_settings = self.client.get("/ai-settings")
         ai_builder = self.client.get("/simulations/ai-builder")
+        audit_log = self.client.get("/audit-log")
 
         self.assertEqual(simulations.status_code, 200)
         self.assertIn(b"Authorized internal training simulations only", simulations.data)
@@ -173,6 +174,85 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b'data-preview-pane="sms"', ai_builder.data)
         self.assertIn(b'data-preview-pane="voice"', ai_builder.data)
         self.assertIn(b"/api/simulations/ai/save-draft", ai_builder.data)
+        self.assertEqual(audit_log.status_code, 200)
+        self.assertIn(b"Audit Log", audit_log.data)
+        self.assertIn(b'name="action_type"', audit_log.data)
+        self.assertIn(b'name="entity_type"', audit_log.data)
+        self.assertIn(b'name="channel"', audit_log.data)
+        self.assertIn(b'name="actor"', audit_log.data)
+        self.assertIn(b'name="campaign_id"', audit_log.data)
+        self.assertIn(b'name="start_date"', audit_log.data)
+        self.assertIn(b'name="end_date"', audit_log.data)
+
+    def test_audit_log_requires_login(self):
+        anonymous_client = self.socialfish.app.test_client()
+
+        response = anonymous_client.get("/audit-log")
+        detail_response = anonymous_client.get("/audit-log/1")
+
+        self.assertIn(response.status_code, (200, 401, 302))
+        self.assertIn(b"Unauthorized", response.data)
+        self.assertNotIn(b"Audit Log", response.data)
+        self.assertIn(detail_response.status_code, (200, 401, 302))
+        self.assertIn(b"Unauthorized", detail_response.data)
+        self.assertNotIn(b"Audit Event Detail", detail_response.data)
+
+    def test_audit_log_filters_and_detail_view_render_redacted_metadata(self):
+        campaign_id = self._campaign_id()
+        provider_id = self._provider_id("local")
+
+        self.client.post(
+            "/api/ai-settings",
+            json={
+                "provider_id": provider_id,
+                "name": "Route Local Provider",
+                "provider_type": "local",
+                "model_name": "route-model",
+                "base_url": "http://localhost.test",
+                "enabled": True,
+                "secret": "plaintext-route-secret",
+                "description": "Route test provider",
+            },
+        )
+        self.client.post(
+            "/simulations/campaigns/{}/deliveries/preview".format(campaign_id),
+            json={"mode": "dry_run"},
+        )
+
+        log_response = self.client.get(
+            "/audit-log?action_type=ai_provider.configure&entity_type=ai_provider&actor=route-user"
+        )
+        self.assertEqual(log_response.status_code, 200)
+        self.assertIn(b"ai_provider.configure", log_response.data)
+        self.assertIn(b"Route Local Provider", log_response.data)
+        self.assertIn(b"[redacted]", log_response.data)
+        self.assertNotIn(b"plaintext-route-secret", log_response.data)
+        self.assertEqual(log_response.data.count(b'<span class="badge badge-info">delivery.preview'), 0)
+
+        campaign_log_response = self.client.get("/audit-log?campaign_id={}".format(campaign_id))
+        self.assertEqual(campaign_log_response.status_code, 200)
+        self.assertIn(b"delivery.preview", campaign_log_response.data)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            audit_id = conn.execute(
+                """
+                SELECT id
+                FROM administrative_audit_events
+                WHERE action_type = 'ai_provider.configure'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        detail_response = self.client.get("/audit-log/{}".format(audit_id))
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertIn(b"Audit Event Detail", detail_response.data)
+        self.assertIn(b"ai_provider.configure", detail_response.data)
+        self.assertIn(b"[redacted]", detail_response.data)
+        self.assertNotIn(b"plaintext-route-secret", detail_response.data)
 
     def test_ai_generation_api_generates_and_saves_campaign_draft(self):
         campaign_id = self._campaign_id()
@@ -1339,6 +1419,8 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertIn(b"Recent Delivery Jobs", detail_response.data)
         self.assertIn(b"Provider Settings", detail_response.data)
         self.assertIn(b"/ai-settings#delivery-providers", detail_response.data)
+        self.assertIn(b"Audit Events", detail_response.data)
+        self.assertIn(b"/audit-log?campaign_id=", detail_response.data)
         self.assertIn(b"Edit Campaign", detail_response.data)
         self.assertIn(b"Add Targets", detail_response.data)
         self.assertIn(b"Manual Target Entry", detail_response.data)

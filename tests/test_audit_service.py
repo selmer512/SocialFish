@@ -5,6 +5,8 @@ from pathlib import Path
 
 from core.audit_service import (
     REDACTED_VALUE,
+    audit_filter_options,
+    get_audit_event,
     list_audit_events,
     record_ai_provider_audit,
     record_campaign_audit,
@@ -123,3 +125,40 @@ class AuditServiceTest(unittest.TestCase):
         self.assertEqual(payload["items"][1]["secret_reference"], "vault://safe/ref")
         self.assertEqual(payload["items"][2]["secret_placeholder"], "configured")
 
+    def test_list_audit_events_filters_by_date_and_lookup_decodes_metadata(self):
+        old_id = record_campaign_audit(
+            self.conn,
+            "campaign.create",
+            self.campaign_id,
+            actor_identity="operator@example.test",
+            channel="email",
+            metadata={"name": "Old"},
+            occurred_at="2026-01-15T09:00:00",
+        )
+        new_id = record_delivery_audit(
+            self.conn,
+            "delivery.start",
+            "job:1",
+            campaign_id=self.campaign_id,
+            actor_identity="operator@example.test",
+            channel="sms",
+            metadata={"mode": "dry_run"},
+            occurred_at="2026-02-20T12:00:00",
+        )
+
+        filtered = list_audit_events(
+            self.conn,
+            campaign_id=self.campaign_id,
+            start_date="2026-02-01",
+            end_date="2026-02-28",
+        )
+        self.assertEqual([event["id"] for event in filtered], [new_id])
+
+        detail = get_audit_event(self.conn, old_id)
+        self.assertEqual(detail["metadata"], {"name": "Old"})
+
+        options = audit_filter_options(self.conn)
+        self.assertIn("campaign.create", options["action_types"])
+        self.assertIn("delivery.start", options["action_types"])
+        self.assertIn("campaign", options["entity_types"])
+        self.assertIn("sms", options["channels"])

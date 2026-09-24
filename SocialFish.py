@@ -15,6 +15,9 @@ from core.genReport import genReport
 from core.report import generate_unique
 from core.db_migration import migrate_db
 from core.audit_service import (
+    audit_filter_options,
+    get_audit_event,
+    list_audit_events,
     record_ai_provider_audit,
     record_campaign_audit,
     record_delivery_audit,
@@ -291,6 +294,26 @@ def _metric_filter_options(conn):
         "departments": departments,
         "delivery_statuses": delivery_statuses,
     }
+
+
+def _audit_log_filters():
+    return {
+        "action_type": request.args.get("action_type") or None,
+        "entity_type": request.args.get("entity_type") or None,
+        "channel": request.args.get("channel") or None,
+        "actor_identity": request.args.get("actor") or None,
+        "campaign_id": _optional_int(request.args.get("campaign_id")),
+        "start_date": request.args.get("start_date") or None,
+        "end_date": request.args.get("end_date") or None,
+    }
+
+
+def _audit_event_view_model(event):
+    if not event:
+        return None
+    view = dict(event)
+    view["metadata_pretty"] = json.dumps(event.get("metadata") or {}, indent=2, sort_keys=True)
+    return view
 
 
 def _target_risk_score(target):
@@ -934,6 +957,52 @@ def simulation_campaigns():
     return render_template(
         'admin/simulation_campaigns.html',
         campaigns=campaigns,
+    )
+
+
+@app.route("/audit-log", methods=['GET'])
+@flask_login.login_required
+def administrative_audit_log():
+    selected_event = None
+    filters = {}
+    try:
+        filters = _audit_log_filters()
+        events = [
+            _audit_event_view_model(event)
+            for event in list_audit_events(g.db, **filters, limit=200)
+        ]
+        selected_event_id = _optional_int(request.args.get("event_id"))
+        if selected_event_id:
+            selected_event = _audit_event_view_model(get_audit_event(g.db, selected_event_id))
+            if not selected_event:
+                flash("Audit event #{} was not found.".format(selected_event_id), "danger")
+    except (TypeError, ValueError) as e:
+        flash(str(e), "danger")
+        events = []
+    return render_template(
+        'admin/audit_log.html',
+        events=events,
+        selected_event=selected_event,
+        campaigns=list_campaigns(g.db),
+        filter_options=audit_filter_options(g.db),
+        filters=filters,
+    )
+
+
+@app.route("/audit-log/<int:event_id>", methods=['GET'])
+@flask_login.login_required
+def administrative_audit_event_detail(event_id):
+    event = get_audit_event(g.db, event_id)
+    if not event:
+        flash("Audit event #{} was not found.".format(event_id), "danger")
+        return redirect("/audit-log")
+    return render_template(
+        'admin/audit_log.html',
+        events=[_audit_event_view_model(event)],
+        selected_event=_audit_event_view_model(event),
+        campaigns=list_campaigns(g.db),
+        filter_options=audit_filter_options(g.db),
+        filters={},
     )
 
 
