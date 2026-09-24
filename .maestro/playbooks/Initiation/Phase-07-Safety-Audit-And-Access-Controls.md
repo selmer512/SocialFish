@@ -84,11 +84,16 @@ This phase strengthens the modernization work with auditability, explicit author
   - Created `docs/features/simulation-safety-audit.md` with structured reference front matter, required tags, and related wiki-links.
   - Documented the authorized-use workflow, administrative audit event schema and workflow actions, delivery readiness checks, recursive metadata redaction rules, and authenticated admin access-control expectations.
 
-- [ ] Add automated safety and audit coverage:
+- [x] Add automated safety and audit coverage:
   - Test audit events are recorded for key campaign, target, AI, delivery, directory, and export workflows
   - Test readiness checks block incomplete campaigns before delivery
   - Test unauthenticated users cannot access new admin pages or APIs
   - Test redaction for secrets and sensitive metadata
+
+  Completion notes:
+  - Expanded unauthenticated route coverage across simulation admin pages, metrics/export APIs, AI settings and generation APIs, delivery preview/start/status routes, audit log views, and directory integration APIs.
+  - Verified existing safety/audit coverage records campaign, target, AI generation/provider, delivery, directory, report, and export audit events; blocks incomplete delivery readiness; and redacts secret-shaped audit metadata.
+  - Verified with `python -m unittest tests.test_simulation_routes` and `python -m unittest discover tests` (95 tests).
 
 - [ ] Run safety verification:
   - Run the safety and audit tests

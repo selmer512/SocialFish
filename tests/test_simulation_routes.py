@@ -1616,11 +1616,43 @@ class SimulationRoutesTest(unittest.TestCase):
 
     def test_simulation_admin_routes_require_login(self):
         anonymous_client = self.socialfish.app.test_client()
+        campaign_id = self._campaign_id()
+        provider_id = self._provider_id("local")
+        protected_resource_id = 1
         protected_requests = [
+            anonymous_client.get("/simulations"),
             anonymous_client.get("/simulations/campaigns"),
+            anonymous_client.get("/simulations/campaigns/new"),
+            anonymous_client.post("/simulations/campaigns", data={}),
+            anonymous_client.get("/simulations/campaigns/{}".format(campaign_id)),
+            anonymous_client.post("/simulations/campaigns/{}/archive".format(campaign_id)),
+            anonymous_client.get("/simulations/ai-builder"),
+            anonymous_client.get("/ai-settings"),
+            anonymous_client.post("/api/ai-settings", json={}),
+            anonymous_client.post("/api/delivery-settings", json={}),
+            anonymous_client.get("/audit-log"),
+            anonymous_client.get("/audit-log/1"),
+            anonymous_client.get("/api/simulations/metrics"),
             anonymous_client.get("/api/simulations/metrics/overview"),
+            anonymous_client.get("/api/simulations/campaigns/{}/metrics".format(campaign_id)),
+            anonymous_client.get("/api/simulations/campaigns/{}/targets/metrics".format(campaign_id)),
+            anonymous_client.get("/simulations/campaigns/{}/targets/metrics.csv".format(campaign_id)),
+            anonymous_client.get("/simulations/campaigns/{}/events.json".format(campaign_id)),
+            anonymous_client.get("/simulations/campaigns/{}/report".format(campaign_id)),
             anonymous_client.post("/api/simulations/events", json={}),
-            anonymous_client.post("/simulations/campaigns/{}/deliveries/start".format(self._campaign_id()), json={}),
+            anonymous_client.post("/api/simulations/ai/generate", json={"provider_id": provider_id}),
+            anonymous_client.post("/api/simulations/ai/save-draft", json={}),
+            anonymous_client.post("/simulations/campaigns/{}/deliveries/preview".format(campaign_id), json={}),
+            anonymous_client.post("/simulations/campaigns/{}/deliveries/start".format(campaign_id), json={}),
+            anonymous_client.get("/api/simulations/deliveries/1"),
+            anonymous_client.get("/simulations/deliveries/1"),
+            anonymous_client.get("/integrations/directory"),
+            anonymous_client.post("/api/integrations/directory/providers", json={}),
+            anonymous_client.post("/api/integrations/directory/providers/{}/test".format(protected_resource_id), json={}),
+            anonymous_client.get("/api/integrations/directory/providers/{}/groups".format(protected_resource_id)),
+            anonymous_client.post("/api/integrations/directory/providers/{}/preview".format(protected_resource_id), json={}),
+            anonymous_client.post("/api/integrations/directory/providers/{}/sync".format(protected_resource_id), json={}),
+            anonymous_client.get("/integrations/directory/sync-jobs/{}".format(protected_resource_id)),
         ]
 
         for response in protected_requests:
