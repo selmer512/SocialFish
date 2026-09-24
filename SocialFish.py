@@ -3218,7 +3218,7 @@ def main():
         # Inicia o servidor com SocketIO
         host = os.environ.get("SOCIALFISH_HOST", "0.0.0.0")
         port = int(os.environ.get("SOCIALFISH_PORT", "5000"))
-        socketio.run(app, host=host, port=port, debug=False)
+        socketio.run(\n            app,\n            host=host,\n            port=port,\n            debug=False,\n            allow_unsafe_werkzeug=True,\n        )
 
 if __name__ == "__main__":
     try:
