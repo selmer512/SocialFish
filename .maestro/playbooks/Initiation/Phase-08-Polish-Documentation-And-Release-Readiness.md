@@ -57,7 +57,7 @@ This phase consolidates the modernization into a maintainable release candidate.
   - Updated the README quick-start simulation section from prototype language to GUI-first Simulation Platform instructions, including `/simulations`, campaigns, AI builder, AI settings, directory integration, metrics, and audit routes.
   - Kept operational commands limited to app startup, Docker startup, dependency/browser setup, unit tests, and Python compile checks; provider feature use is documented through the UI.
 
-- [ ] Add regression test coverage across the full simulation workflow:
+- [x] Add regression test coverage across the full simulation workflow:
   - Campaign creation with authorization statement
   - Manual target entry and CSV upload
   - Mock AI generation and draft save
@@ -65,6 +65,10 @@ This phase consolidates the modernization into a maintainable release candidate.
   - Metrics dashboard and exports
   - Mock directory sync
   - Audit log entries and unauthenticated route protection
+
+  Completion notes:
+  - Added `SimulationRoutesTest.test_full_simulation_workflow_regression` to exercise the authenticated Flask workflow end to end: protected route checks, campaign authorization, manual and CSV targets, mock AI draft generation/save, dry-run delivery, public tracking routes, metrics/export endpoints, mock Entra preview/sync, and expected administrative audit actions.
+  - Verified with `python -m unittest tests.test_simulation_routes.SimulationRoutesTest.test_full_simulation_workflow_regression` and `python -m unittest discover tests`.
 
 - [ ] Add a UI smoke runner or script if one does not already exist:
   - Start the Flask app with test credentials in a controlled local process

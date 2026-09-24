@@ -1868,6 +1868,216 @@ class SimulationRoutesTest(unittest.TestCase):
             conn.close()
         self.assertEqual(imported, 1)
 
+    def test_full_simulation_workflow_regression(self):
+        anonymous_client = self.socialfish.app.test_client()
+        anonymous_campaigns = anonymous_client.get("/simulations/campaigns")
+        anonymous_metrics = anonymous_client.get("/api/simulations/metrics")
+        self.assertIn(anonymous_campaigns.status_code, (200, 401, 302))
+        self.assertIn(b"Unauthorized", anonymous_campaigns.data)
+        self.assertIn(anonymous_metrics.status_code, (200, 401, 302))
+        self.assertIn(b"Unauthorized", anonymous_metrics.data)
+
+        create_campaign_response = self.client.post(
+            "/simulations/campaigns",
+            data={
+                "name": "Workflow Regression Campaign",
+                "description": "End-to-end workflow coverage",
+                "objective": "Practice reporting suspicious payment requests",
+                "training_owner": "Security Awareness",
+                "status": "active",
+                "selected_channels": ["email", "sms", "voice"],
+                "landing_url": "https://training.example.test/landing",
+                "training_url": "https://training.example.test/course",
+                "authorized_scope": "Internal employees in the regression cohort",
+                "authorization_statement": "Security leadership authorized this internal training regression.",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(create_campaign_response.status_code, 302)
+
+        campaign_id = int(create_campaign_response.headers["Location"].rstrip("/").split("/")[-1])
+        manual_response = self.client.post(
+            "/simulations/campaigns/{}/targets".format(campaign_id),
+            data={
+                "name": "Workflow Manual Target",
+                "display_name": "Workflow Manual",
+                "email": "workflow.manual@example.test",
+                "department": "Finance",
+                "manager": "Avery Stone",
+                "channel": "email",
+                "active": "on",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(manual_response.status_code, 200)
+        self.assertIn(b"Target Workflow Manual added to the campaign.", manual_response.data)
+
+        csv_content = (
+            "name,email,phone,channel,department\n"
+            "Workflow CSV SMS,,+15550107777,sms,Operations\n"
+            "Workflow CSV Voice,,+15550108888,voice,Support\n"
+        )
+        csv_response = self.client.post(
+            "/simulations/campaigns/{}/targets/upload".format(campaign_id),
+            data={
+                "targets_csv": (
+                    io.BytesIO(csv_content.encode("utf-8")),
+                    "workflow-targets.csv",
+                ),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertEqual(csv_response.status_code, 200)
+        self.assertIn(b"Imported 2 target(s) from CSV.", csv_response.data)
+
+        provider_id = self._provider_id("local")
+        generate_response = self.client.post(
+            "/api/simulations/ai/generate",
+            json={
+                "campaign_id": campaign_id,
+                "provider_id": provider_id,
+                "scenario_goal": "Practice reporting suspicious payment requests",
+                "audience": "Finance, operations, and support teams",
+                "channels": ["email", "sms", "voice"],
+                "tone": "calm",
+                "difficulty": "standard",
+                "training_reminder": "Use the report button before taking action.",
+            },
+        )
+        self.assertEqual(generate_response.status_code, 200)
+        generation = generate_response.get_json()["generation"]
+        self.assertEqual(set(generation["channels"]), {"email", "sms", "voice"})
+
+        save_response = self.client.post(
+            "/api/simulations/ai/save-draft",
+            json={
+                "campaign_id": campaign_id,
+                "provider": generation["provider"],
+                "channels": generation["channels"],
+                "draft": generation["draft"],
+                "risk_flags": generation["risk_flags"],
+                "safety_notes": generation["safety_notes"],
+                "metadata": generation["metadata"],
+                "audit_id": generation["administrative_audit_event_id"],
+            },
+        )
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(save_response.get_json()["draft"]["campaign_id"], campaign_id)
+
+        preview_response = self.client.post(
+            "/simulations/campaigns/{}/deliveries/preview".format(campaign_id),
+            json={"mode": "dry_run"},
+        )
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.get_json()["preview"]["total_attempts"], 3)
+
+        start_response = self.client.post(
+            "/simulations/campaigns/{}/deliveries/start".format(campaign_id),
+            json={"mode": "dry_run"},
+        )
+        self.assertEqual(start_response.status_code, 200)
+        delivery = start_response.get_json()["delivery"]
+        job_id = delivery["job"]["id"]
+        self.assertEqual(delivery["job"]["status"], "completed")
+        self.assertEqual(delivery["job"]["delivered_count"], 3)
+        self.assertEqual(len(delivery["tracking_tokens"]), 9)
+
+        open_token = next(token for token in delivery["tracking_tokens"] if token["token_type"] == "open")
+        link_token = next(token for token in delivery["tracking_tokens"] if token["token_type"] == "link")
+        attachment_token = next(token for token in delivery["tracking_tokens"] if token["token_type"] == "attachment")
+        open_response = anonymous_client.get("/simulations/track/open/{}".format(open_token["token"]))
+        link_response = anonymous_client.get("/simulations/track/link/{}".format(link_token["token"]))
+        attachment_response = anonymous_client.post("/simulations/track/attachment/{}".format(attachment_token["token"]))
+        self.assertEqual(open_response.status_code, 200)
+        self.assertEqual(open_response.mimetype, "image/gif")
+        self.assertEqual(link_response.status_code, 302)
+        self.assertEqual(link_response.headers["Location"], "https://training.example.test/course")
+        self.assertEqual(attachment_response.status_code, 200)
+        self.assertEqual(attachment_response.get_json()["status"], "ok")
+
+        metrics_response = self.client.get("/api/simulations/campaigns/{}/metrics".format(campaign_id))
+        targets_metrics_response = self.client.get(
+            "/api/simulations/campaigns/{}/targets/metrics".format(campaign_id)
+        )
+        metrics_csv_response = self.client.get(
+            "/simulations/campaigns/{}/targets/metrics.csv".format(campaign_id)
+        )
+        events_export_response = self.client.get("/simulations/campaigns/{}/events.json".format(campaign_id))
+        self.assertEqual(metrics_response.status_code, 200)
+        self.assertEqual(metrics_response.get_json()["metrics"]["aggregate"]["delivered"], 3)
+        self.assertEqual(metrics_response.get_json()["metrics"]["aggregate"]["opened"], 1)
+        self.assertEqual(targets_metrics_response.status_code, 200)
+        self.assertEqual(len(targets_metrics_response.get_json()["targets"]), 3)
+        self.assertEqual(metrics_csv_response.status_code, 200)
+        self.assertIn(b"workflow.manual@example.test", metrics_csv_response.data)
+        self.assertEqual(events_export_response.status_code, 200)
+        self.assertEqual(events_export_response.get_json()["campaign"]["id"], campaign_id)
+
+        directory_response = self.client.post(
+            "/api/integrations/directory/providers",
+            json={
+                "name": "Workflow Mock Entra",
+                "provider_type": "mock_entra",
+                "enabled": True,
+                "consent_status": "granted",
+                "selected_groups": ["group-finance"],
+            },
+        )
+        self.assertEqual(directory_response.status_code, 200)
+        directory_provider_id = directory_response.get_json()["provider"]["id"]
+
+        directory_preview_response = self.client.post(
+            "/api/integrations/directory/providers/{}/preview".format(directory_provider_id),
+            json={"group_ids": ["group-finance"]},
+        )
+        self.assertEqual(directory_preview_response.status_code, 200)
+        self.assertEqual(directory_preview_response.get_json()["sync_job"]["job"]["staged_count"], 2)
+
+        directory_sync_response = self.client.post(
+            "/api/integrations/directory/providers/{}/sync".format(directory_provider_id),
+            json={"group_ids": ["group-finance"], "campaign_id": campaign_id},
+        )
+        self.assertEqual(directory_sync_response.status_code, 200)
+        self.assertEqual(directory_sync_response.get_json()["sync_job"]["job"]["imported_count"], 2)
+
+        delivery_status_response = self.client.get("/api/simulations/deliveries/{}".format(job_id))
+        self.assertEqual(delivery_status_response.status_code, 200)
+        self.assertEqual(delivery_status_response.get_json()["delivery"]["job"]["id"], job_id)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            target_sources = {
+                row[0]: row[1]
+                for row in conn.execute(
+                    """
+                    SELECT source, COUNT(*)
+                    FROM simulation_targets
+                    WHERE campaign_id = ?
+                    GROUP BY source
+                    """,
+                    (campaign_id,),
+                )
+            }
+        finally:
+            conn.close()
+        self.assertEqual(target_sources, {"csv": 2, "directory": 2, "manual": 1})
+
+        audit_actions = [event["action_type"] for event in self._administrative_audit_events(campaign_id)]
+        for expected_action in (
+            "campaign.create",
+            "target.create",
+            "target.csv_import",
+            "generation.create",
+            "generation.draft_save",
+            "delivery.preview",
+            "delivery.start",
+            "export.metrics",
+            "export.events",
+            "directory_sync.sync",
+        ):
+            self.assertIn(expected_action, audit_actions)
+
 
 if __name__ == "__main__":
     unittest.main()
