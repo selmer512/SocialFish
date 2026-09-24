@@ -75,10 +75,14 @@ This phase strengthens the modernization work with auditability, explicit author
   - Added route tests for validation failures, structured error shapes, and unauthenticated access protection.
   - Verified with `python -m unittest discover tests` (95 tests).
 
-- [ ] Add structured safety documentation while implementing controls:
+- [x] Add structured safety documentation while implementing controls:
   - Create `docs/features/simulation-safety-audit.md` with YAML front matter using type `reference`, tags for `audit`, `safety`, and `access-control`
   - Include wiki-links to `[[Simulation-Campaigns]]`, `[[Simulation-Delivery-Tracking]]`, and `[[Entra-Directory-Integration]]`
   - Document audit events, readiness checks, redaction rules, and authorized-use workflow
+
+  Completion notes:
+  - Created `docs/features/simulation-safety-audit.md` with structured reference front matter, required tags, and related wiki-links.
+  - Documented the authorized-use workflow, administrative audit event schema and workflow actions, delivery readiness checks, recursive metadata redaction rules, and authenticated admin access-control expectations.
 
 - [ ] Add automated safety and audit coverage:
   - Test audit events are recorded for key campaign, target, AI, delivery, directory, and export workflows
