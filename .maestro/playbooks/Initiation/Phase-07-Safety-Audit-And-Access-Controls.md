@@ -15,11 +15,17 @@ This phase strengthens the modernization work with auditability, explicit author
   - Secret handling is already write-only for AI, delivery, and directory provider credentials: settings store `secret_placeholder`/`secret_reference` instead of plaintext secret values, and response helpers remove `secret_placeholder`. Existing export redaction helpers cover sensitive metadata keys. SMTP mail password in `/api/mail` is passed directly to `sendMail` and is not persisted.
   - Existing audit-like tables include `ai_generation_audits`, `directory_sync_audit_events`, and `simulation_events`; the next audit-service task should unify these under a broader administrative audit table without storing raw provider secrets.
 
-- [ ] Add an audit event service:
+- [x] Add an audit event service:
   - Create idempotent tables for administrative audit events, actor identity, action type, entity type, entity ID, channel, IP address, user agent, timestamp, and structured metadata
   - Add helper functions for recording campaign, target, AI provider, generation, delivery, export, and directory sync actions
   - Ensure audit metadata does not store plaintext secrets
   - Reuse existing database connection patterns
+
+  Completion notes:
+  - Added `administrative_audit_events` to `core/db_migration.py` with idempotent column checks and indexes for action, entity, campaign, and actor filtering.
+  - Added `core/audit_service.py` with generic and workflow-specific recording helpers for campaign, target, AI provider, generation, delivery, export, and directory sync audit events.
+  - Added recursive audit metadata redaction for plaintext secret-bearing keys while preserving safe placeholder/reference fields.
+  - Added `tests/test_audit_service.py` coverage plus migration schema assertions in `tests/test_simulation_migration.py`.
 
 - [ ] Instrument high-value workflows with audit events:
   - Campaign create, update, archive, delivery preview, and delivery start

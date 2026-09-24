@@ -34,6 +34,7 @@ class SimulationMigrationTest(unittest.TestCase):
                 "staged_directory_users",
                 "directory_group_mappings",
                 "directory_sync_audit_events",
+                "administrative_audit_events",
             }
             tables = {
                 row[0]
@@ -110,6 +111,25 @@ class SimulationMigrationTest(unittest.TestCase):
                     "smtp_email": 0,
                     "voice_api": 0,
                 },
+            )
+
+            admin_audit_columns = {
+                row[1]
+                for row in cur.execute("PRAGMA table_info(administrative_audit_events)")
+            }
+            self.assertTrue(
+                {
+                    "actor_identity",
+                    "action_type",
+                    "entity_type",
+                    "entity_id",
+                    "campaign_id",
+                    "channel",
+                    "ip_address",
+                    "user_agent",
+                    "metadata_json",
+                    "created_at",
+                }.issubset(admin_audit_columns)
             )
 
             delivery_job_columns = {

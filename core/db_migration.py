@@ -1194,6 +1194,41 @@ def migrate_db(database_path):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_directory_group_mappings_provider ON directory_group_mappings(provider_id, selected)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_directory_sync_audit_events_job ON directory_sync_audit_events(sync_job_id, event_type)")
 
+    # ============= ADMINISTRATIVE AUDIT EVENTS (Phase 07) =============
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS administrative_audit_events (
+            id INTEGER PRIMARY KEY,
+            actor_identity TEXT,
+            action_type TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT,
+            campaign_id INTEGER,
+            channel TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (campaign_id) REFERENCES simulation_campaigns(id)
+        )
+    """)
+    _ensure_columns(cur, "administrative_audit_events", {
+        "actor_identity": "TEXT",
+        "action_type": "TEXT",
+        "entity_type": "TEXT",
+        "entity_id": "TEXT",
+        "campaign_id": "INTEGER",
+        "channel": "TEXT",
+        "ip_address": "TEXT",
+        "user_agent": "TEXT",
+        "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    })
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_audit_action ON administrative_audit_events(action_type, created_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_audit_entity ON administrative_audit_events(entity_type, entity_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_audit_campaign ON administrative_audit_events(campaign_id, created_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_audit_actor ON administrative_audit_events(actor_identity, created_at)")
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS ai_campaign_drafts (
             id INTEGER PRIMARY KEY,
