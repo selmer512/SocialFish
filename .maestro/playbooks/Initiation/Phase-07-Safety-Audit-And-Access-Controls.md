@@ -95,8 +95,15 @@ This phase strengthens the modernization work with auditability, explicit author
   - Verified existing safety/audit coverage records campaign, target, AI generation/provider, delivery, directory, report, and export audit events; blocks incomplete delivery readiness; and redacts secret-shaped audit metadata.
   - Verified with `python -m unittest tests.test_simulation_routes` and `python -m unittest discover tests` (95 tests).
 
-- [ ] Run safety verification:
+- [x] Run safety verification:
   - Run the safety and audit tests
   - Use automated HTTP requests to confirm protected routes redirect or reject unauthenticated users
   - Use automated HTTP requests to create an incomplete campaign and verify delivery is blocked by readiness checks
   - Fix any validation, authorization, audit, or template failures discovered during verification
+
+  Completion notes:
+  - Verified focused safety/audit coverage with `python -m unittest tests.test_audit_service tests.test_simulation_routes` (41 tests).
+  - Verified the full regression suite with `python -m unittest discover tests` (95 tests).
+  - Ran automated Flask HTTP-client checks for unauthenticated access across simulation, audit, AI settings, delivery, and directory routes; protected routes returned the existing legacy `Unauthorized` body.
+  - Created an authenticated incomplete campaign through `/simulations/campaigns` and confirmed `/simulations/campaigns/<id>/deliveries/start` returned HTTP 400 with `delivery_readiness_failed` before any delivery job was created.
+  - No validation, authorization, audit, or template failures were discovered, so no code changes were required.
