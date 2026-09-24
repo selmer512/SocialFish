@@ -62,11 +62,18 @@ This phase strengthens the modernization work with auditability, explicit author
   - Blocked delivery job creation and `/deliveries/start` when readiness fails, returning structured JSON errors or actionable UI flash messages.
   - Added admin UI readiness checklist on campaign detail pages and automated service/route/migration coverage for blocked launches and provider readiness.
 
-- [ ] Improve API and form validation:
+- [x] Improve API and form validation:
   - Add CSRF protection where compatible with the existing form stack or document a project-compatible alternative in code comments
   - Validate IDs, channel values, dates, and status transitions in simulation routes
   - Standardize JSON error responses for simulation APIs
   - Ensure routes that should require login consistently use the existing login-required pattern
+
+  Completion notes:
+  - Added route-level validation for positive IDs, simulation channels, metric date ranges, delivery status filters, delivery mode/max retries, campaign form dates, and campaign status transitions.
+  - Documented the project-compatible CSRF approach in `SocialFish.py`: the current legacy Flask form stack has no Flask-WTF/hidden-token support, so authenticated sessions plus strict route validation remain the compatible guardrail until a template-wide CSRF retrofit.
+  - Standardized remaining simulation/admin JSON validation failures through `_json_error` for simulation events, target metrics CSV export, AI provider settings, delivery provider settings, provider webhooks, and delivery validation paths.
+  - Added route tests for validation failures, structured error shapes, and unauthenticated access protection.
+  - Verified with `python -m unittest discover tests` (95 tests).
 
 - [ ] Add structured safety documentation while implementing controls:
   - Create `docs/features/simulation-safety-audit.md` with YAML front matter using type `reference`, tags for `audit`, `safety`, and `access-control`

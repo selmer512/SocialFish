@@ -584,7 +584,22 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["error"]["type"], "simulation_metrics_overview_error")
-        self.assertIn("Channel must be one of", payload["error"]["message"])
+        self.assertIn("channel must be one of", payload["error"]["message"].lower())
+
+    def test_metrics_apis_reject_invalid_dates_and_delivery_statuses(self):
+        bad_date_response = self.client.get("/api/simulations/metrics/overview?start_date=09/22/2026")
+        bad_range_response = self.client.get(
+            "/api/simulations/metrics/overview?start_date=2026-09-23&end_date=2026-09-22"
+        )
+        bad_status_response = self.client.get("/api/simulations/metrics/overview?delivery_status=opened")
+
+        self.assertEqual(bad_date_response.status_code, 400)
+        self.assertEqual(bad_date_response.get_json()["error"]["type"], "simulation_metrics_overview_error")
+        self.assertIn("YYYY-MM-DD", bad_date_response.get_json()["error"]["message"])
+        self.assertEqual(bad_range_response.status_code, 400)
+        self.assertIn("Start date", bad_range_response.get_json()["error"]["message"])
+        self.assertEqual(bad_status_response.status_code, 400)
+        self.assertIn("Delivery status must be one of", bad_status_response.get_json()["error"]["message"])
 
     def test_metrics_dashboard_renders_filtered_campaign_reporting(self):
         conn = sqlite3.connect(self.db_path)
@@ -789,6 +804,22 @@ class SimulationRoutesTest(unittest.TestCase):
         self.assertEqual(payload["event"]["event_type"], "attachment_open")
         self.assertNotIn("route-pass", str(payload))
 
+    def test_events_api_returns_structured_validation_errors(self):
+        response = self.client.post(
+            "/api/simulations/events",
+            json={
+                "campaign_id": self._campaign_id(),
+                "event_type": "attachment_open",
+                "channel": "fax",
+            },
+        )
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["error"]["type"], "simulation_event_record_error")
+        self.assertIn("channel must be one of", payload["error"]["message"])
+
     def test_delivery_routes_preview_start_and_render_status(self):
         campaign_id = self._campaign_id()
 
@@ -891,6 +922,16 @@ class SimulationRoutesTest(unittest.TestCase):
 
         self.assertEqual(missing_preview.status_code, 400)
         self.assertEqual(missing_preview_payload["error"]["type"], "delivery_preview_error")
+
+        bad_mode = self.client.post(
+            "/simulations/campaigns/{}/deliveries/start".format(self._campaign_id()),
+            json={"mode": "immediate"},
+        )
+        bad_mode_payload = bad_mode.get_json()
+
+        self.assertEqual(bad_mode.status_code, 400)
+        self.assertEqual(bad_mode_payload["error"]["type"], "delivery_start_error")
+        self.assertIn("Delivery mode must be dry_run or provider", bad_mode_payload["error"]["message"])
 
     def test_delivery_start_with_disabled_provider_reports_failed_attempts(self):
         campaign_id = self._campaign_id()
@@ -1519,6 +1560,73 @@ class SimulationRoutesTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn(b"Campaign name is required.", response.data)
+
+    def test_campaign_routes_validate_dates_and_status_transitions(self):
+        create_response = self.client.post(
+            "/simulations/campaigns",
+            data={
+                "name": "Route Invalid Date Campaign",
+                "status": "draft",
+                "selected_channels": ["email"],
+                "start_date": "2026/10/01",
+                "authorization_statement": "Authorized internal validation test.",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(create_response.status_code, 400)
+        self.assertIn(b"start_date must use YYYY-MM-DD format.", create_response.data)
+
+        campaign_id = self._campaign_id()
+        complete_response = self.client.post(
+            "/simulations/campaigns/{}".format(campaign_id),
+            data={
+                "name": "Completed Route Campaign",
+                "status": "completed",
+                "selected_channels": ["email"],
+                "authorization_statement": "Authorized internal validation test.",
+            },
+            follow_redirects=False,
+        )
+        archived_response = self.client.post(
+            "/simulations/campaigns/{}".format(campaign_id),
+            data={
+                "name": "Archived Route Campaign",
+                "status": "archived",
+                "selected_channels": ["email"],
+                "authorization_statement": "Authorized internal validation test.",
+            },
+            follow_redirects=True,
+        )
+        reactivate_response = self.client.post(
+            "/simulations/campaigns/{}".format(campaign_id),
+            data={
+                "name": "Reactivated Route Campaign",
+                "status": "active",
+                "selected_channels": ["email"],
+                "authorization_statement": "Authorized internal validation test.",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(complete_response.status_code, 302)
+        self.assertEqual(archived_response.status_code, 200)
+        self.assertIn(b"Campaign status must be one of: draft, active, paused, completed", archived_response.data)
+        self.assertEqual(reactivate_response.status_code, 200)
+        self.assertIn(b"Campaign status cannot transition from completed to active.", reactivate_response.data)
+
+    def test_simulation_admin_routes_require_login(self):
+        anonymous_client = self.socialfish.app.test_client()
+        protected_requests = [
+            anonymous_client.get("/simulations/campaigns"),
+            anonymous_client.get("/api/simulations/metrics/overview"),
+            anonymous_client.post("/api/simulations/events", json={}),
+            anonymous_client.post("/simulations/campaigns/{}/deliveries/start".format(self._campaign_id()), json={}),
+        ]
+
+        for response in protected_requests:
+            self.assertIn(response.status_code, (200, 401, 302))
+            self.assertIn(b"Unauthorized", response.data)
+            self.assertNotIn(b"Campaign Management", response.data)
 
     def test_target_sample_csv_route_generates_download(self):
         response = self.client.get("/simulations/targets/sample.csv")

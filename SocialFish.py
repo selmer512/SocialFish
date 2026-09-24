@@ -28,6 +28,9 @@ from core.audit_service import (
 )
 from core.simulation_service import (
     TARGET_CSV_COLUMNS,
+    DELIVERY_STATUS_METRICS,
+    VALID_CAMPAIGN_STATUSES,
+    VALID_SIMULATION_CHANNELS,
     archive_campaign,
     archive_target,
     ai_generation_response_payload,
@@ -132,6 +135,13 @@ TARGET_CSV_SAMPLE_ROWS = (
         "active": "true",
     },
 )
+ADMIN_FORM_STATUSES = ("draft", "active", "paused", "completed")
+ALLOWED_CAMPAIGN_STATUS_TRANSITIONS = {
+    "draft": {"draft", "active", "paused", "completed"},
+    "active": {"active", "paused", "completed"},
+    "paused": {"active", "paused", "completed"},
+    "completed": {"completed"},
+}
 TRACKING_PIXEL_GIF = (
     b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00"
     b"\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00"
@@ -249,19 +259,60 @@ def _request_data():
 def _optional_int(value):
     if value in (None, ""):
         return None
-    return int(value)
+    number = int(value)
+    if number < 1:
+        raise ValueError("IDs must be positive integers.")
+    return number
+
+
+def _normalize_api_channel(value, field_name="channel"):
+    channel = (str(value or "").strip()).lower()
+    if not channel:
+        return None
+    if channel not in VALID_SIMULATION_CHANNELS:
+        raise ValueError("{} must be one of: {}".format(field_name, ", ".join(sorted(VALID_SIMULATION_CHANNELS))))
+    return channel
+
+
+def _normalize_api_date(value, field_name):
+    if value in (None, ""):
+        return None
+    normalized = str(value).strip()
+    try:
+        datetime.strptime(normalized, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("{} must use YYYY-MM-DD format.".format(field_name)) from exc
+    return normalized
+
+
+def _validate_date_range(start_date, end_date):
+    if start_date and end_date and start_date > end_date:
+        raise ValueError("Start date must be on or before end date.")
+
+
+def _normalize_delivery_status_filter(value):
+    normalized = (str(value or "").strip()).lower()
+    if not normalized:
+        return None
+    if normalized not in DELIVERY_STATUS_METRICS:
+        raise ValueError("Delivery status must be one of: {}".format(", ".join(sorted(DELIVERY_STATUS_METRICS))))
+    return normalized
 
 
 def _simulation_metric_filters(active_campaigns_only=False):
     channels = request.args.getlist("channel")
     if not channels and request.args.get("channels"):
         channels = request.args.get("channels", "").split(",")
+    normalized_channels = [_normalize_api_channel(channel) for channel in channels]
+    start_date = _normalize_api_date(request.args.get("start_date"), "start_date")
+    end_date = _normalize_api_date(request.args.get("end_date"), "end_date")
+    _validate_date_range(start_date, end_date)
     filters = {
-        "channels": channels,
-        "start_date": request.args.get("start_date"),
-        "end_date": request.args.get("end_date"),
+        "channels": [channel for channel in normalized_channels if channel],
+        "start_date": start_date,
+        "end_date": end_date,
         "department": request.args.get("department"),
-        "delivery_status": request.args.get("delivery_status"),
+        "delivery_status": _normalize_delivery_status_filter(request.args.get("delivery_status")),
     }
     if active_campaigns_only:
         filters["active_campaigns_only"] = True
@@ -298,14 +349,17 @@ def _metric_filter_options(conn):
 
 
 def _audit_log_filters():
+    start_date = _normalize_api_date(request.args.get("start_date"), "start_date")
+    end_date = _normalize_api_date(request.args.get("end_date"), "end_date")
+    _validate_date_range(start_date, end_date)
     return {
         "action_type": request.args.get("action_type") or None,
         "entity_type": request.args.get("entity_type") or None,
         "channel": request.args.get("channel") or None,
         "actor_identity": request.args.get("actor") or None,
         "campaign_id": _optional_int(request.args.get("campaign_id")),
-        "start_date": request.args.get("start_date") or None,
-        "end_date": request.args.get("end_date") or None,
+        "start_date": start_date,
+        "end_date": end_date,
     }
 
 
@@ -423,17 +477,23 @@ def _request_channels():
 
 def _campaign_payload():
     data = _request_data()
+    status = (data.get("status") or "draft").strip().lower()
+    if status not in ADMIN_FORM_STATUSES:
+        raise ValueError("Campaign status must be one of: {}".format(", ".join(ADMIN_FORM_STATUSES)))
+    start_date = _normalize_api_date(data.get("start_date"), "start_date")
+    end_date = _normalize_api_date(data.get("end_date"), "end_date")
+    _validate_date_range(start_date, end_date)
     return {
         "name": data.get("name"),
         "description": data.get("description"),
         "objective": data.get("objective"),
         "training_owner": data.get("training_owner"),
-        "status": data.get("status") or "draft",
+        "status": status,
         "selected_channels": _request_channels(),
         "landing_url": data.get("landing_url"),
         "training_url": data.get("training_url"),
-        "start_date": data.get("start_date"),
-        "end_date": data.get("end_date"),
+        "start_date": start_date,
+        "end_date": end_date,
         "authorized_scope": data.get("authorized_scope"),
         "authorization_statement": data.get("authorization_statement"),
     }
@@ -449,7 +509,7 @@ def _target_payload(include_active=True):
         "department": data.get("department"),
         "manager": data.get("manager"),
         "source": data.get("source") or "manual",
-        "channel": data.get("channel"),
+        "channel": _normalize_api_channel(data.get("channel")) if data.get("channel") else None,
     }
     if include_active and "active" in data:
         payload["active"] = _form_bool(data.get("active"))
@@ -466,6 +526,23 @@ def _json_error(error_type, message, status_code=400, **extra):
     }
     payload["error"].update(extra)
     return jsonify(payload), status_code
+
+
+def _validate_campaign_status_transition(existing_status, requested_status):
+    current = (existing_status or "draft").lower()
+    requested = (requested_status or current).lower()
+    if current not in VALID_CAMPAIGN_STATUSES or requested not in VALID_CAMPAIGN_STATUSES:
+        raise ValueError("Campaign status must be one of: {}".format(", ".join(sorted(VALID_CAMPAIGN_STATUSES))))
+    allowed = ALLOWED_CAMPAIGN_STATUS_TRANSITIONS.get(current, {current})
+    if requested not in allowed:
+        raise ValueError("Campaign status cannot transition from {} to {}.".format(current, requested))
+
+
+# CSRF compatibility note: this legacy Flask stack does not include Flask-WTF or
+# hidden CSRF fields in the existing admin templates. Simulation mutation routes
+# therefore keep the project-compatible guardrail of Flask-Login authenticated
+# sessions plus strict same-route validation; a future template-wide CSRF token
+# retrofit can be added without changing the service-layer contracts below.
 
 
 def _tracking_metadata(source):
@@ -524,7 +601,7 @@ def _delivery_provider_ids(data):
     provider_ids = data.get("provider_ids")
     if isinstance(provider_ids, dict):
         return {
-            str(channel): _optional_int(provider_id)
+            _normalize_api_channel(channel, "provider channel"): _optional_int(provider_id)
             for channel, provider_id in provider_ids.items()
             if _optional_int(provider_id) is not None
         }
@@ -543,10 +620,16 @@ def _delivery_provider_ids(data):
 
 def _delivery_payload():
     data = _request_data()
+    mode = (data.get("mode") or "dry_run").strip().lower()
+    if mode not in {"dry_run", "provider"}:
+        raise ValueError("Delivery mode must be dry_run or provider.")
+    max_retries = int(data.get("max_retries") or 0)
+    if max_retries < 0:
+        raise ValueError("Max retries must be zero or greater.")
     return {
-        "mode": data.get("mode") or "dry_run",
+        "mode": mode,
         "provider_ids": _delivery_provider_ids(data),
-        "max_retries": int(data.get("max_retries") or 0),
+        "max_retries": max_retries,
     }
 
 
@@ -1014,7 +1097,7 @@ def new_simulation_campaign():
     return render_template(
         'admin/simulation_campaign_form.html',
         campaign=None,
-        statuses=("draft", "active", "paused", "completed"),
+        statuses=ADMIN_FORM_STATUSES,
         channels=("email", "sms", "voice"),
     )
 
@@ -1048,7 +1131,7 @@ def create_simulation_campaign():
         return render_template(
             'admin/simulation_campaign_form.html',
             campaign=_request_data(),
-            statuses=("draft", "active", "paused", "completed"),
+            statuses=ADMIN_FORM_STATUSES,
             channels=("email", "sms", "voice"),
         ), 400
 
@@ -1081,7 +1164,7 @@ def simulation_campaign_detail(campaign_id):
         delivery_providers=detail["delivery_providers"],
         target_filters=detail["target_filters"],
         target_filter_options=detail["target_filter_options"],
-        statuses=("draft", "active", "paused", "completed"),
+        statuses=ADMIN_FORM_STATUSES,
         channels=("email", "sms", "voice"),
         target_csv_required_columns=TARGET_CSV_REQUIRED_COLUMNS,
         target_csv_optional_columns=TARGET_CSV_OPTIONAL_COLUMNS,
@@ -1244,6 +1327,7 @@ def simulation_attachment_tracking_event(token):
 @app.route("/api/simulations/providers/<channel>/<provider_key>/webhook", methods=['POST'])
 def simulation_provider_webhook(channel, provider_key):
     try:
+        channel = _normalize_api_channel(channel)
         provider = get_delivery_provider_by_key(g.db, channel, provider_key)
         if not provider:
             return _json_error("provider_webhook_error", "Unknown simulation delivery provider.", 404)
@@ -1271,7 +1355,10 @@ def simulation_provider_webhook(channel, provider_key):
 @flask_login.login_required
 def update_simulation_campaign(campaign_id):
     try:
-        campaign = update_campaign(g.db, campaign_id, **_campaign_payload())
+        payload = _campaign_payload()
+        existing = get_campaign_detail(g.db, campaign_id)["campaign"]
+        _validate_campaign_status_transition(existing.get("status"), payload.get("status"))
+        campaign = update_campaign(g.db, campaign_id, **payload)
         record_campaign_audit(
             g.db,
             "campaign.update",
@@ -1506,7 +1593,7 @@ def simulation_campaign_target_metrics_csv(campaign_id):
         )
         return _target_metrics_csv_response(detail["campaign"], targets, get_campaign_metrics(g.db, campaign_id, filters)["filters"])
     except (TypeError, ValueError) as e:
-        return Response(str(e), status=400, mimetype="text/plain")
+        return _json_error("simulation_target_metrics_export_error", str(e), 400)
 
 
 @app.route("/simulations/campaigns/<int:campaign_id>/events.json", methods=['GET'])
@@ -1602,18 +1689,20 @@ def simulation_metrics_overview_api():
 def simulation_events_api():
     data = _request_data()
     try:
+        channel = _normalize_api_channel(data.get('channel')) if data.get('channel') else None
+        delivery_status = _normalize_delivery_status_filter(data.get('delivery_status'))
         event = record_simulation_event(
             g.db,
             _optional_int(data.get('campaign_id')),
             data.get('event_type'),
             target_id=_optional_int(data.get('target_id')),
-            channel=data.get('channel'),
-            delivery_status=data.get('delivery_status'),
+            channel=channel,
+            delivery_status=delivery_status,
             metadata=data.get('metadata') if isinstance(data.get('metadata'), dict) else None,
         )
         return jsonify({'status': 'ok', 'event': event})
     except (TypeError, ValueError) as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 400
+        return _json_error("simulation_event_record_error", str(e), 400)
 
 
 @app.route("/simulations/ai-builder", methods=['GET'])
@@ -1751,7 +1840,7 @@ def ai_settings_api():
         )
         return jsonify({'status': 'ok', 'provider': provider})
     except (TypeError, ValueError) as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 400
+        return _json_error("ai_provider_settings_error", str(e), 400)
 
 
 @app.route("/api/delivery-settings", methods=['POST'])
@@ -1773,7 +1862,7 @@ def delivery_settings_api():
         return redirect("/ai-settings#delivery-providers")
     except (TypeError, ValueError) as e:
         if request.is_json:
-            return jsonify({'status': 'error', 'message': str(e)}), 400
+            return _json_error("delivery_provider_settings_error", str(e), 400)
         flash(str(e), "danger")
         return redirect("/ai-settings#delivery-providers")
 
