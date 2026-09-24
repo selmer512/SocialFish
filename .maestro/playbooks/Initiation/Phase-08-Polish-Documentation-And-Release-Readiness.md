@@ -46,11 +46,16 @@ This phase consolidates the modernization into a maintainable release candidate.
   - Added `docs/features/simulation-platform-index.md` with structured front matter, required feature wiki-links, a UI/data-flow/safety feature map, an end-to-end Mermaid flow, operating modes, and a safe operating checklist.
   - Verified the index content against the existing feature references and admin templates for current UI route names.
 
-- [ ] Add or update developer-facing run documentation:
+- [x] Add or update developer-facing run documentation:
   - Update existing setup or quick-start documentation with GUI-first instructions for launching the app and accessing the new simulation pages
   - Document dry-run delivery, mock AI generation, mock Entra sync, and how to move from mock mode to configured providers through the UI
   - Keep commands limited to app startup and tests; do not require CLI configuration for feature use
   - Add troubleshooting notes for common SQLite, dependency, and template import issues
+
+  Completion notes:
+  - Added `docs/reference/developer-runbook.md` with structured front matter, wiki-links, local startup steps, GUI route map, dry-run/mock/provider-mode guidance, test commands, and SQLite/dependency/template troubleshooting.
+  - Updated the README quick-start simulation section from prototype language to GUI-first Simulation Platform instructions, including `/simulations`, campaigns, AI builder, AI settings, directory integration, metrics, and audit routes.
+  - Kept operational commands limited to app startup, Docker startup, dependency/browser setup, unit tests, and Python compile checks; provider feature use is documented through the UI.
 
 - [ ] Add regression test coverage across the full simulation workflow:
   - Campaign creation with authorization statement

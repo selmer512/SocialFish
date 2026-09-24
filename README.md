@@ -48,15 +48,22 @@ python SocialFish.py admin password
 
 Then access: **http://localhost:5000/neptune**
 
-### Simulation Center Prototype
-
-The Phase 01 Simulation Center prototype runs from the normal Flask startup path:
+### Simulation Platform
 
 ```bash
 python SocialFish.py admin password
 ```
 
-After logging in at **http://localhost:5000/neptune**, open **/simulations** for authorized internal training metrics and **/ai-settings** for UI-managed local/cloud provider configuration. The startup path initializes the database and applies the simulation migrations automatically; no external AI credentials are required for the prototype.
+After logging in at **http://localhost:5000/neptune**, open the GUI-first simulation workflows:
+
+- **/simulations** - simulation dashboard and campaign navigation
+- **/simulations/campaigns** - authorized campaign setup, targets, readiness, and delivery
+- **/simulations/ai-builder** - mock or configured-provider AI draft generation
+- **/ai-settings** - UI-managed AI and delivery provider settings
+- **/integrations/directory** - mock Entra sync and future Microsoft Graph settings
+- **/simulations/metrics** and **/audit-log** - reporting and administrative review
+
+Local development can stay entirely offline by using dry-run delivery, mock AI generation, and mock Entra sync from the UI. To move toward configured providers, use the same settings pages to enable provider types, enter visible settings, and store write-only secret placeholders; provider shells fail closed until their live execution paths are implemented. See **[Developer Runbook](docs/reference/developer-runbook.md)** for simulation startup, test commands, provider-mode guidance, and SQLite/dependency/template troubleshooting.
 
 ## 🎯 Basic Workflow
 
